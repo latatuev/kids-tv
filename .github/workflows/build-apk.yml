@@ -76,8 +76,8 @@ jobs:
                   applicationId 'com.latatuev.kidstv'
                   minSdk 23
                   targetSdk 35
-                  versionCode 2
-                  versionName '0.2'
+                  versionCode 3
+                  versionName '0.3'
               }
           }
           EOF
@@ -127,10 +127,12 @@ jobs:
           import android.content.Intent;
           import android.net.Uri;
           import android.os.Bundle;
+          import android.view.KeyEvent;
           import android.view.View;
           import android.webkit.JavascriptInterface;
           import android.webkit.WebChromeClient;
           import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
           import android.webkit.WebView;
           import android.webkit.WebViewClient;
           import android.widget.Toast;
@@ -150,9 +152,14 @@ jobs:
                   );
 
                   webView = new WebView(this);
+                  webView.setFocusable(true);
+                  webView.setFocusableInTouchMode(true);
                   setContentView(webView);
 
-                  WebSettingsCompat.configure(webView);
+                  WebSettings s = webView.getSettings();
+                  s.setJavaScriptEnabled(true);
+                  s.setDomStorageEnabled(true);
+                  s.setMediaPlaybackRequiresUserGesture(false);
 
                   webView.addJavascriptInterface(new Bridge(), "KidsTVAndroid");
                   webView.setWebChromeClient(new WebChromeClient());
@@ -167,9 +174,53 @@ jobs:
                       public boolean shouldOverrideUrlLoading(WebView view, String url) {
                           return handleUrl(url);
                       }
+
+                      @Override
+                      public void onPageFinished(WebView view, String url) {
+                          super.onPageFinished(view, url);
+                          installTvFocusSupport();
+                      }
                   });
 
                   webView.loadUrl(HOME);
+                  webView.requestFocus();
+              }
+
+              private void installTvFocusSupport() {
+                  String js =
+                      "(function(){" +
+                      "if(window.__kidsTvNativeFocusInstalled)return;" +
+                      "window.__kidsTvNativeFocusInstalled=true;" +
+                      "var st=document.createElement('style');" +
+                      "st.textContent='.card:focus{transform:scale(1.055);z-index:5}.card:focus .poster{box-shadow:0 0 0 5px #fff,0 14px 36px rgba(0,0,0,.48)}.profile:focus{box-shadow:0 0 0 4px rgba(255,255,255,.45);transform:scale(1.04)}';" +
+                      "document.head.appendChild(st);" +
+                      "function first(){" +
+                      " var a=document.activeElement;" +
+                      " if(!a||a===document.body||a===document.documentElement){" +
+                      "   var c=document.querySelector('.card'); if(c){c.focus();c.scrollIntoView({block:'nearest',inline:'nearest'});}" +
+                      " }" +
+                      "}" +
+                      "var host=document.getElementById('content');" +
+                      "if(host){new MutationObserver(first).observe(host,{childList:true,subtree:true});}" +
+                      "first();" +
+                      "})();";
+                  webView.evaluateJavascript(js, null);
+
+                  // Data can take a few seconds to arrive on the TV.
+                  webView.postDelayed(this::focusFirstIfNeeded, 1200);
+                  webView.postDelayed(this::focusFirstIfNeeded, 3000);
+                  webView.postDelayed(this::focusFirstIfNeeded, 6000);
+              }
+
+              private void focusFirstIfNeeded() {
+                  runJs(
+                      "(function(){" +
+                      "var a=document.activeElement;" +
+                      "if(!a||a===document.body||a===document.documentElement){" +
+                      "var c=document.querySelector('.card');if(c){c.focus();c.scrollIntoView({block:'nearest',inline:'nearest'});}" +
+                      "}" +
+                      "})()"
+                  );
               }
 
               private boolean handleUrl(String url) {
@@ -221,6 +272,54 @@ jobs:
                   }
               }
 
+              private void runJs(String code) {
+                  if (webView != null) {
+                      webView.evaluateJavascript(code, null);
+                  }
+              }
+
+              private void move(String arrow) {
+                  runJs(
+                      "(function(){" +
+                      "if(typeof moveFocus==='function'){moveFocus('" + arrow + "');}" +
+                      "var a=document.activeElement;" +
+                      "if(a&&a.scrollIntoView){a.scrollIntoView({block:'nearest',inline:'nearest'});}" +
+                      "})()"
+                  );
+              }
+
+              private void clickFocused() {
+                  runJs(
+                      "(function(){" +
+                      "var a=document.activeElement;" +
+                      "if(a&&a!==document.body&&typeof a.click==='function'){a.click();return;}" +
+                      "var c=document.querySelector('.card');" +
+                      "if(c){c.focus();c.click();}" +
+                      "})()"
+                  );
+              }
+
+              @Override
+              public boolean dispatchKeyEvent(KeyEvent event) {
+                  if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                      switch (event.getKeyCode()) {
+                          case KeyEvent.KEYCODE_DPAD_LEFT:
+                              move("ArrowLeft"); return true;
+                          case KeyEvent.KEYCODE_DPAD_RIGHT:
+                              move("ArrowRight"); return true;
+                          case KeyEvent.KEYCODE_DPAD_UP:
+                              move("ArrowUp"); return true;
+                          case KeyEvent.KEYCODE_DPAD_DOWN:
+                              move("ArrowDown"); return true;
+                          case KeyEvent.KEYCODE_DPAD_CENTER:
+                          case KeyEvent.KEYCODE_ENTER:
+                          case KeyEvent.KEYCODE_NUMPAD_ENTER:
+                              clickFocused(); return true;
+                      }
+                  }
+                  return super.dispatchKeyEvent(event);
+              }
+
               public class Bridge {
                   @JavascriptInterface
                   public void search(final String title) {
@@ -234,15 +333,6 @@ jobs:
                       webView.goBack();
                   } else {
                       super.onBackPressed();
-                  }
-              }
-
-              private static class WebSettingsCompat {
-                  static void configure(WebView webView) {
-                      android.webkit.WebSettings s = webView.getSettings();
-                      s.setJavaScriptEnabled(true);
-                      s.setDomStorageEnabled(true);
-                      s.setMediaPlaybackRequiresUserGesture(false);
                   }
               }
           }
