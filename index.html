@@ -172,14 +172,28 @@ function makeCard(m){
     img.src=m.poster_url;img.alt=m.title;img.onload=()=>img.classList.add('loaded');
   }
   node.onclick=()=>{
+    if(/Android/i.test(navigator.userAgent)){
+      openKinoPubSearch(m.title);
+      return;
+    }
     if(m.kinopub_match_status!=='matched'||!m.kinopub_id){
-      setStatus(`«${m.title}»: ещё не сопоставлен с KinoPub`);
+      setStatus(`«${m.title}»: на Google TV откроется поиск KinoPub`);
     }else{
       setStatus(`Открываю «${m.title}»…`);
       window.dispatchEvent(new CustomEvent('kidstv:play',{detail:m}));
     }
   };
   return node;
+}
+
+
+function openKinoPubSearch(title){
+  setStatus(`Ищу в KinoPub: «${title}»…`);
+  const q=encodeURIComponent(title);
+  // KinoPub 1.35b3 exposes InfoActivity for android.intent.action.SEARCH.
+  // Using an explicit component avoids Android choosing another search-capable app.
+  const intent=`intent:#Intent;component=com.kinopub/com.kinopub.activity.InfoActivity;action=android.intent.action.SEARCH;category=android.intent.category.DEFAULT;S.query=${q};end`;
+  window.location.href=intent;
 }
 
 function visibleCards(){return [...document.querySelectorAll('.card')].filter(e=>e.offsetParent!==null)}
