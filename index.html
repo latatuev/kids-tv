@@ -110,6 +110,18 @@ async function load(){
 function render(){
   renderProfiles();
   renderCollections();
+  requestAnimationFrame(()=>{
+    setTimeout(()=>{
+      const active=document.activeElement;
+      if(!active || active===document.body || active===document.documentElement){
+        const first=document.querySelector('.card');
+        if(first){
+          first.focus();
+          first.scrollIntoView({block:'nearest',inline:'nearest'});
+        }
+      }
+    },80);
+  });
 }
 
 function renderProfiles(){
@@ -189,9 +201,19 @@ function makeCard(m){
 
 function openKinoPubSearch(title){
   setStatus(`Ищу в KinoPub: «${title}»…`);
+
+  // Installed Kids TV APK exposes this native bridge.
+  // Prefer it over browser intent:// because browsers may block external activities.
+  try{
+    if(window.KidsTVAndroid && typeof window.KidsTVAndroid.search==='function'){
+      window.KidsTVAndroid.search(title);
+      return;
+    }
+  }catch(e){
+    console.warn('Native bridge unavailable',e);
+  }
+
   const q=encodeURIComponent(title);
-  // KinoPub 1.35b3 exposes InfoActivity for android.intent.action.SEARCH.
-  // Using an explicit component avoids Android choosing another search-capable app.
   const intent=`intent:#Intent;component=com.kinopub/com.kinopub.activity.InfoActivity;action=android.intent.action.SEARCH;category=android.intent.category.DEFAULT;S.query=${q};end`;
   window.location.href=intent;
 }
@@ -220,11 +242,32 @@ function moveFocus(key){
   }
 }
 
+function ensureFocus(){
+  const a=document.activeElement;
+  if(!a || a===document.body || a===document.documentElement){
+    document.querySelector('.card')?.focus();
+  }
+}
+
+window.addEventListener('focus',ensureFocus);
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) setTimeout(ensureFocus,100); });
+
 document.addEventListener('keydown',e=>{
   if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){
-    e.preventDefault();moveFocus(e.key);
+    e.preventDefault();
+    ensureFocus();
+    moveFocus(e.key);
+    document.activeElement?.scrollIntoView?.({block:'nearest',inline:'nearest'});
+    return;
   }
-});
+  if(e.key==='Enter' || e.key===' '){
+    const a=document.activeElement;
+    if(a && (a.classList.contains('card') || a.classList.contains('profile'))){
+      e.preventDefault();
+      a.click();
+    }
+  }
+},true);
 
 load().catch(err=>{
   console.error(err);
