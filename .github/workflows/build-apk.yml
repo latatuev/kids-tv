@@ -6,11 +6,44 @@ on:
     paths:
       - ".github/workflows/build-apk.yml"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install permanent GitHub Pages bootstrap
+        shell: bash
+        run: |
+          cat > index.html <<'EOF'
+          <!doctype html>
+          <html lang="ru">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+            <meta name="theme-color" content="#101114">
+            <title>Kids TV</title>
+          </head>
+          <body style="margin:0;background:#101114;color:#fff;font-family:Arial,Helvetica,sans-serif">
+            <div style="padding:32px 42px;font-size:22px">Kids TV · загрузка…</div>
+            <script src="https://cmgdmsqcxrbwxghydmtb.supabase.co/functions/v1/kids-tv-app"></script>
+          </body>
+          </html>
+          EOF
+
+          if ! git diff --quiet -- index.html; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add index.html
+            git commit -m "Use remotely managed Kids TV frontend"
+            git push
+          fi
+
       - name: Set up Java 17
         uses: actions/setup-java@v6
         with:
@@ -76,8 +109,8 @@ jobs:
                   applicationId 'com.latatuev.kidstv'
                   minSdk 23
                   targetSdk 35
-                  versionCode 3
-                  versionName '0.3'
+                  versionCode 4
+                  versionName '0.4'
               }
           }
           EOF
@@ -139,7 +172,11 @@ jobs:
 
           public class MainActivity extends Activity {
               private static final String HOME = "https://latatuev.github.io/kids-tv/";
+
               private WebView webView;
+              private boolean firstResume = true;
+              private boolean returningFromKinoPub = false;
+              private boolean backgrounded = false;
 
               @Override
               protected void onCreate(Bundle savedInstanceState) {
@@ -178,7 +215,7 @@ jobs:
                       @Override
                       public void onPageFinished(WebView view, String url) {
                           super.onPageFinished(view, url);
-                          installTvFocusSupport();
+                          scheduleFocus();
                       }
                   });
 
@@ -186,49 +223,15 @@ jobs:
                   webView.requestFocus();
               }
 
-              private void installTvFocusSupport() {
-                  String js =
-                      "(function(){" +
-                      "if(window.__kidsTvNativeFocusInstalled)return;" +
-                      "window.__kidsTvNativeFocusInstalled=true;" +
-                      "var st=document.createElement('style');" +
-                      "st.textContent='.card:focus{transform:scale(1.055);z-index:5}.card:focus .poster{box-shadow:0 0 0 5px #fff,0 14px 36px rgba(0,0,0,.48)}.profile:focus{box-shadow:0 0 0 4px rgba(255,255,255,.45);transform:scale(1.04)}';" +
-                      "document.head.appendChild(st);" +
-                      "function first(){" +
-                      " var a=document.activeElement;" +
-                      " if(!a||a===document.body||a===document.documentElement){" +
-                      "   var c=document.querySelector('.card'); if(c){c.focus();c.scrollIntoView({block:'nearest',inline:'nearest'});}" +
-                      " }" +
-                      "}" +
-                      "var host=document.getElementById('content');" +
-                      "if(host){new MutationObserver(first).observe(host,{childList:true,subtree:true});}" +
-                      "first();" +
-                      "})();";
-                  webView.evaluateJavascript(js, null);
-
-                  // Data can take a few seconds to arrive on the TV.
-                  webView.postDelayed(this::focusFirstIfNeeded, 1200);
-                  webView.postDelayed(this::focusFirstIfNeeded, 3000);
-                  webView.postDelayed(this::focusFirstIfNeeded, 6000);
-              }
-
-              private void focusFirstIfNeeded() {
-                  runJs(
-                      "(function(){" +
-                      "var a=document.activeElement;" +
-                      "if(!a||a===document.body||a===document.documentElement){" +
-                      "var c=document.querySelector('.card');if(c){c.focus();c.scrollIntoView({block:'nearest',inline:'nearest'});}" +
-                      "}" +
-                      "})()"
-                  );
-              }
-
               private boolean handleUrl(String url) {
-                  if (url == null || !url.startsWith("intent:")) return false;
+                  if (url == null || !url.startsWith("intent:")) {
+                      return false;
+                  }
 
                   try {
                       Intent parsed = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
                       String title = parsed.getStringExtra(SearchManager.QUERY);
+
                       if (title == null || title.isEmpty()) {
                           title = parsed.getStringExtra("query");
                       }
@@ -236,11 +239,13 @@ jobs:
                       if (title != null && !title.isEmpty()) {
                           openKinoPubSearch(Uri.decode(title));
                       } else {
+                          returningFromKinoPub = true;
                           startActivity(parsed);
                       }
                   } catch (Exception e) {
                       Toast.makeText(this, "Не удалось открыть KinoPub", Toast.LENGTH_LONG).show();
                   }
+
                   return true;
               }
 
@@ -252,12 +257,17 @@ jobs:
                           "com.kinopub.activity.InfoActivity"
                       ));
                       i.putExtra(SearchManager.QUERY, title);
+
+                      returningFromKinoPub = true;
                       startActivity(i);
                   } catch (Exception e) {
                       try {
                           Intent launch = getPackageManager().getLaunchIntentForPackage("com.kinopub");
+
                           if (launch != null) {
+                              returningFromKinoPub = true;
                               startActivity(launch);
+
                               Toast.makeText(
                                   this,
                                   "KinoPub открыт, но поиск передать не удалось",
@@ -270,6 +280,34 @@ jobs:
                           Toast.makeText(this, "Не удалось открыть KinoPub", Toast.LENGTH_LONG).show();
                       }
                   }
+              }
+
+              private void scheduleFocus() {
+                  focusFirstIfNeeded();
+                  webView.postDelayed(this::focusFirstIfNeeded, 800);
+                  webView.postDelayed(this::focusFirstIfNeeded, 2500);
+                  webView.postDelayed(this::focusFirstIfNeeded, 5000);
+              }
+
+              private void focusFirstIfNeeded() {
+                  runJs(
+                      "(function(){" +
+                      "var a=document.activeElement;" +
+                      "if(!a||a===document.body||a===document.documentElement){" +
+                      "var c=document.querySelector('.card');" +
+                      "if(c){c.focus();c.scrollIntoView({block:'nearest',inline:'nearest'});}" +
+                      "}" +
+                      "})()"
+                  );
+              }
+
+              private void refreshPage() {
+                  if (webView == null) return;
+
+                  webView.clearHistory();
+                  webView.reload();
+                  webView.requestFocus();
+                  scheduleFocus();
               }
 
               private void runJs(String code) {
@@ -304,20 +342,78 @@ jobs:
                   if (event.getAction() == KeyEvent.ACTION_DOWN) {
                       switch (event.getKeyCode()) {
                           case KeyEvent.KEYCODE_DPAD_LEFT:
-                              move("ArrowLeft"); return true;
+                              move("ArrowLeft");
+                              return true;
+
                           case KeyEvent.KEYCODE_DPAD_RIGHT:
-                              move("ArrowRight"); return true;
+                              move("ArrowRight");
+                              return true;
+
                           case KeyEvent.KEYCODE_DPAD_UP:
-                              move("ArrowUp"); return true;
+                              move("ArrowUp");
+                              return true;
+
                           case KeyEvent.KEYCODE_DPAD_DOWN:
-                              move("ArrowDown"); return true;
+                              move("ArrowDown");
+                              return true;
+
                           case KeyEvent.KEYCODE_DPAD_CENTER:
                           case KeyEvent.KEYCODE_ENTER:
                           case KeyEvent.KEYCODE_NUMPAD_ENTER:
-                              clickFocused(); return true;
+                              clickFocused();
+                              return true;
                       }
                   }
+
                   return super.dispatchKeyEvent(event);
+              }
+
+              @Override
+              protected void onResume() {
+                  super.onResume();
+
+                  if (firstResume) {
+                      firstResume = false;
+                      return;
+                  }
+
+                  if (returningFromKinoPub) {
+                      returningFromKinoPub = false;
+                      backgrounded = false;
+
+                      if (webView != null) {
+                          webView.requestFocus();
+                          scheduleFocus();
+                      }
+
+                      return;
+                  }
+
+                  if (backgrounded) {
+                      backgrounded = false;
+                      refreshPage();
+                  }
+              }
+
+              @Override
+              protected void onStop() {
+                  super.onStop();
+                  backgrounded = true;
+              }
+
+              @Override
+              public void onBackPressed() {
+                  String url = webView != null ? webView.getUrl() : null;
+
+                  if (webView != null &&
+                      webView.canGoBack() &&
+                      url != null &&
+                      !url.startsWith(HOME)) {
+                      webView.goBack();
+                      return;
+                  }
+
+                  finishAndRemoveTask();
               }
 
               public class Bridge {
@@ -325,14 +421,15 @@ jobs:
                   public void search(final String title) {
                       runOnUiThread(() -> openKinoPubSearch(title));
                   }
-              }
 
-              @Override
-              public void onBackPressed() {
-                  if (webView != null && webView.canGoBack()) {
-                      webView.goBack();
-                  } else {
-                      super.onBackPressed();
+                  @JavascriptInterface
+                  public void refresh() {
+                      runOnUiThread(() -> refreshPage());
+                  }
+
+                  @JavascriptInterface
+                  public void close() {
+                      runOnUiThread(() -> finishAndRemoveTask());
                   }
               }
           }
