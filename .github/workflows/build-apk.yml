@@ -1,516 +1,109 @@
-name: Build Kids TV APK
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
-
-      - name: Create Android project
-        shell: bash
-        run: |
-          mkdir -p app/src/main/java/com/latatuev/kidstv
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/values
-
-          cat > settings.gradle <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          rootProject.name = 'KidsTV'
-          include ':app'
-          EOF
-
-          cat > build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application' version '8.5.2' apply false
-          }
-          EOF
-
-          cat > app/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application'
-          }
-
-          android {
-              namespace 'com.latatuev.kidstv'
-              compileSdk 35
-
-              defaultConfig {
-                  applicationId 'com.latatuev.kidstv'
-                  minSdk 23
-                  targetSdk 35
-                  versionCode 7
-                  versionName '0.7'
-              }
-
-              signingConfigs {
-                  release {
-                      storeFile file('../kids-tv-release.jks')
-                      storePassword System.getenv('KIDSTV_KEYSTORE_PASSWORD')
-                      keyAlias System.getenv('KIDSTV_KEY_ALIAS')
-                      keyPassword System.getenv('KIDSTV_KEY_PASSWORD')
-                  }
-              }
-
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                      signingConfig signingConfigs.release
-                  }
-              }
-          }
-          EOF
-
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-feature android:name="android.software.leanback" android:required="false" />
-              <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
-
-              <queries>
-                  <package android:name="com.kinopub" />
-                  <package android:name="org.videolan.vlc" />
-              </queries>
-
-              <application
-                  android:allowBackup="true"
-                  android:usesCleartextTraffic="true"
-                  android:theme="@style/AppTheme"
-                  android:label="Kids TV"
-                  android:icon="@drawable/kidstv_icon"
-                  android:banner="@drawable/kidstv_banner">
-
-                  <activity
-                      android:name=".MainActivity"
-                      android:screenOrientation="landscape"
-                      android:configChanges="keyboard|keyboardHidden|orientation|screenSize"
-                      android:exported="true">
-
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-
-          cat > app/src/main/res/values/styles.xml <<'EOF'
-          <resources>
-              <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
-                  <item name="android:fontFamily">sans</item>
-                  <item name="android:windowFullscreen">true</item>
-                  <item name="android:colorAccent">#AFC4D6</item>
-                  <item name="android:navigationBarColor">#132238</item>
-                  <item name="android:windowBackground">#132238</item>
-              </style>
-          </resources>
-          EOF
-
-          cat > app/src/main/res/drawable/kidstv_icon.xml <<'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
-              <path android:fillColor="#132238" android:pathData="M0,0h108v108h-108z"/>
-              <path android:fillColor="#EAF1F7"
-                  android:pathData="M25,29h58a9,9 0,0 1,9,9v40a9,9 0,0 1,-9,9h-58a9,9 0,0 1,-9,-9v-40a9,9 0,0 1,9,-9M25,36a2,2 0,0 0,-2,2v40a2,2 0,0 0,2,2h58a2,2 0,0 0,2,-2v-40a2,2 0,0 0,-2,-2z"/>
-              <path android:strokeColor="#EAF1F7" android:strokeWidth="6"
-                  android:strokeLineCap="round" android:fillColor="@android:color/transparent"
-                  android:pathData="M42,18L52,29M66,18L56,29"/>
-              <path android:fillColor="#D8E3EC"
-                  android:pathData="M62,48a15,15 0,1 0,12,24a13,13 0,1 1,-12,-24z"/>
-              <path android:fillColor="#AFC4D6"
-                  android:pathData="M42,48l2.5,5.2l5.7,0.8l-4.1,4l1,5.7l-5.1,-2.7l-5.1,2.7l1,-5.7l-4.1,-4l5.7,-0.8z"/>
-          </vector>
-          EOF
-
-          cat > app/src/main/res/drawable/kidstv_banner.xml <<'EOF'
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="320dp"
-              android:height="180dp"
-              android:viewportWidth="320"
-              android:viewportHeight="180">
-              <path android:fillColor="#132238" android:pathData="M0,0h320v180h-320z"/>
-              <path android:fillColor="#EAF1F7"
-                  android:pathData="M50,47h76a10,10 0,0 1,10,10v52a10,10 0,0 1,-10,10h-76a10,10 0,0 1,-10,-10v-52a10,10 0,0 1,10,-10M50,54a3,3 0,0 0,-3,3v52a3,3 0,0 0,3,3h76a3,3 0,0 0,3,-3v-52a3,3 0,0 0,-3,-3z"/>
-              <path android:strokeColor="#EAF1F7" android:strokeWidth="6"
-                  android:strokeLineCap="round" android:fillColor="@android:color/transparent"
-                  android:pathData="M72,34L84,47M104,34L92,47"/>
-              <path android:fillColor="#D8E3EC"
-                  android:pathData="M96,69a18,18 0,1 0,14,29a16,16 0,1 1,-14,-29z"/>
-              <path android:fillColor="#AFC4D6"
-                  android:pathData="M70,69l3,6l7,1l-5,5l1.2,7l-6.2,-3.3l-6.2,3.3l1.2,-7l-5,-5l7,-1z"/>
-          </vector>
-          EOF
-
-          cat > app/src/main/java/com/latatuev/kidstv/MainActivity.java <<'EOF'
-          package com.latatuev.kidstv;
-
-          import android.app.Activity;
-          import android.app.SearchManager;
-          import android.content.ComponentName;
-          import android.content.Intent;
-          import android.net.Uri;
-          import android.os.Bundle;
-          import android.view.KeyEvent;
-          import android.view.View;
-          import android.webkit.JavascriptInterface;
-          import android.webkit.WebChromeClient;
-          import android.webkit.WebResourceRequest;
-          import android.webkit.WebSettings;
-          import android.webkit.WebView;
-          import android.webkit.WebViewClient;
-          import android.widget.Toast;
-
-          public class MainActivity extends Activity {
-              private static final String HOME = "https://latatuev.github.io/kids-tv/";
-
-              private WebView webView;
-              private boolean firstResume = true;
-              private boolean returningFromExternalApp = false;
-              private boolean backgrounded = false;
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-
-                  getWindow().getDecorView().setSystemUiVisibility(
-                      View.SYSTEM_UI_FLAG_FULLSCREEN |
-                      View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
-                      View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                  );
-
-                  webView = new WebView(this);
-                  webView.setFocusable(true);
-                  webView.setFocusableInTouchMode(true);
-                  setContentView(webView);
-
-                  WebSettings s = webView.getSettings();
-                  s.setJavaScriptEnabled(true);
-                  s.setDomStorageEnabled(true);
-                  s.setMediaPlaybackRequiresUserGesture(false);
-                  s.setAllowFileAccess(true);
-                  s.setAllowContentAccess(true);
-
-                  Bridge bridge = new Bridge();
-                  webView.addJavascriptInterface(bridge, "KidsTVAndroid");
-                  webView.addJavascriptInterface(bridge, "Android");
-                  webView.setWebChromeClient(new WebChromeClient());
-
-                  webView.setWebViewClient(new WebViewClient() {
-                      @Override
-                      public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                          return handleUrl(request.getUrl().toString());
+                              }
+                              sendDiag("player_buffering", null);
+                          } else if (playbackState == Player.STATE_READY) {
+                              JSONObject extra = new JSONObject();
+                              try {
+                                  if (bufferingStartedAt > 0L) {
+                                      extra.put(
+                                          "buffering_ms",
+                                          System.currentTimeMillis() - bufferingStartedAt
+                                      );
+                                  }
+                              } catch (Exception ignored) {}
+                              bufferingStartedAt = 0L;
+                              sendDiag("player_ready", extra);
+                          } else if (playbackState == Player.STATE_ENDED) {
+                              sendDiag("player_ended", null);
+                          }
                       }
 
                       @Override
-                      public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                          return handleUrl(url);
-                      }
-
-                      @Override
-                      public void onPageFinished(WebView view, String url) {
-                          super.onPageFinished(view, url);
-                          scheduleFocus();
+                      public void onPlayerError(PlaybackException error) {
+                          JSONObject extra = new JSONObject();
+                          try {
+                              extra.put("error_code", error.errorCode);
+                              extra.put("error_name", error.getErrorCodeName());
+                              String msg = error.getMessage();
+                              if (msg != null) extra.put("message", msg.substring(0, Math.min(300, msg.length())));
+                          } catch (Exception ignored) {}
+                          sendDiag("player_error", extra);
+                          Toast.makeText(
+                              PlayerActivity.this,
+                              "Ошибка воспроизведения",
+                              Toast.LENGTH_LONG
+                          ).show();
                       }
                   });
 
-                  webView.loadUrl(HOME);
-                  webView.requestFocus();
+                  sendDiag("player_open", null);
+
+                  player.setMediaItem(MediaItem.fromUri(mediaUrl));
+                  player.prepare();
+                  player.play();
               }
 
-              private boolean handleUrl(String url) {
-                  if (url == null) return false;
-
-                  if (url.startsWith("intent:")) {
-                      try {
-                          Intent parsed = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-                          String title = parsed.getStringExtra(SearchManager.QUERY);
-
-                          if (title == null || title.isEmpty()) {
-                              title = parsed.getStringExtra("query");
-                          }
-
-                          if (title != null && !title.isEmpty()) {
-                              openKinoPubSearch(Uri.decode(title));
-                          } else {
-                              returningFromExternalApp = true;
-                              startActivity(parsed);
-                          }
-                      } catch (Exception e) {
-                          Toast.makeText(this, "Не удалось открыть проигрыватель", Toast.LENGTH_LONG).show();
-                      }
-                      return true;
-                  }
-
-                  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                      try {
-                          returningFromExternalApp = true;
-                          startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-                      } catch (Exception e) {
-                          Toast.makeText(this, "Не удалось открыть ссылку", Toast.LENGTH_LONG).show();
-                      }
-                      return true;
-                  }
-
-                  return false;
-              }
-
-              private void openVideo(String url) {
-                  if (url == null || url.trim().isEmpty()) {
-                      Toast.makeText(this, "Пустая ссылка на видео", Toast.LENGTH_LONG).show();
+              private void sendDiag(String event, JSONObject extra) {
+                  final long position = player != null ? Math.max(0L, player.getCurrentPosition()) : 0L;
+                  final long buffered = player != null ? Math.max(0L, player.getBufferedPosition()) : 0L;
+                  final long duration = player != null ? Math.max(0L, player.getDuration()) : 0L;
+                  final String host;
+                  try {
+                      host = Uri.parse(mediaUrl).getHost();
+                  } catch (Exception e) {
                       return;
                   }
 
-                  Uri uri = Uri.parse(url);
-
-                  try {
-                      Intent vlc = new Intent(Intent.ACTION_VIEW);
-                      vlc.setDataAndType(uri, "video/*");
-                      vlc.setPackage("org.videolan.vlc");
-                      returningFromExternalApp = true;
-                      startActivity(vlc);
-                      return;
-                  } catch (Exception ignored) {
-                  }
-
-                  try {
-                      Intent generic = new Intent(Intent.ACTION_VIEW);
-                      generic.setDataAndType(uri, "video/*");
-                      returningFromExternalApp = true;
-                      startActivity(generic);
-                  } catch (Exception e) {
-                      returningFromExternalApp = false;
-                      Toast.makeText(this, "Не удалось открыть видео", Toast.LENGTH_LONG).show();
-                  }
-              }
-
-              private void openKinoPubSearch(String title) {
-                  try {
-                      Intent i = new Intent(Intent.ACTION_SEARCH);
-                      i.setComponent(new ComponentName(
-                          "com.kinopub",
-                          "com.kinopub.activity.InfoActivity"
-                      ));
-                      i.putExtra(SearchManager.QUERY, title);
-
-                      returningFromExternalApp = true;
-                      startActivity(i);
-                  } catch (Exception e) {
+                  new Thread(() -> {
+                      HttpURLConnection conn = null;
                       try {
-                          Intent launch = getPackageManager().getLaunchIntentForPackage("com.kinopub");
-                          if (launch != null) {
-                              returningFromExternalApp = true;
-                              startActivity(launch);
-                              Toast.makeText(
-                                  this,
-                                  "KinoPub открыт, но поиск передать не удалось",
-                                  Toast.LENGTH_LONG
-                              ).show();
-                          } else {
-                              Toast.makeText(this, "KinoPub не установлен", Toast.LENGTH_LONG).show();
+                          JSONObject payload = extra != null ? extra : new JSONObject();
+                          payload.put("position_ms", position);
+                          payload.put("buffered_position_ms", buffered);
+                          payload.put("duration_ms", duration);
+                          payload.put("host", host == null ? "" : host);
+                          payload.put("version", BuildConfig.VERSION_NAME);
+
+                          JSONObject body = new JSONObject();
+                          body.put("client_id", "android-native-player");
+                          body.put("event", event);
+                          body.put("title", mediaTitle);
+                          body.put("payload", payload);
+
+                          conn = (HttpURLConnection) new URL(DIAG_URL).openConnection();
+                          conn.setRequestMethod("POST");
+                          conn.setConnectTimeout(4000);
+                          conn.setReadTimeout(4000);
+                          conn.setDoOutput(true);
+                          conn.setRequestProperty("Content-Type", "application/json");
+
+                          byte[] bytes = body.toString().getBytes(StandardCharsets.UTF_8);
+                          conn.setFixedLengthStreamingMode(bytes.length);
+                          try (OutputStream os = conn.getOutputStream()) {
+                              os.write(bytes);
                           }
+                          conn.getResponseCode();
                       } catch (Exception ignored) {
-                          Toast.makeText(this, "Не удалось открыть KinoPub", Toast.LENGTH_LONG).show();
+                      } finally {
+                          if (conn != null) conn.disconnect();
                       }
-                  }
-              }
-
-              private void scheduleFocus() {
-                  focusFirstIfNeeded();
-                  webView.postDelayed(this::focusFirstIfNeeded, 800);
-                  webView.postDelayed(this::focusFirstIfNeeded, 2500);
-                  webView.postDelayed(this::focusFirstIfNeeded, 5000);
-              }
-
-              private void focusFirstIfNeeded() {
-                  runJs(
-                      "(function(){" +
-                      "var a=document.activeElement;" +
-                      "if(!a||a===document.body||a===document.documentElement){" +
-                      "var c=document.querySelector('.card');" +
-                      "if(c){c.focus();c.scrollIntoView({block:'nearest',inline:'nearest'});}" +
-                      "}" +
-                      "})()"
-                  );
-              }
-
-              private void refreshPage() {
-                  if (webView == null) return;
-                  webView.clearHistory();
-                  webView.reload();
-                  webView.requestFocus();
-                  scheduleFocus();
-              }
-
-              private void runJs(String code) {
-                  if (webView != null) {
-                      webView.evaluateJavascript(code, null);
-                  }
-              }
-
-              private void move(String arrow) {
-                  runJs(
-                      "(function(){" +
-                      "if(typeof moveFocus==='function'){moveFocus('" + arrow + "');}" +
-                      "var a=document.activeElement;" +
-                      "if(a&&a.scrollIntoView){a.scrollIntoView({block:'nearest',inline:'nearest'});}" +
-                      "})()"
-                  );
-              }
-
-              private void clickFocused() {
-                  runJs(
-                      "(function(){" +
-                      "var a=document.activeElement;" +
-                      "if(a&&a!==document.body&&typeof a.click==='function'){a.click();return;}" +
-                      "var c=document.querySelector('.card');" +
-                      "if(c){c.focus();c.click();}" +
-                      "})()"
-                  );
+                  }).start();
               }
 
               @Override
-              public boolean dispatchKeyEvent(KeyEvent event) {
-                  if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                      switch (event.getKeyCode()) {
-                          case KeyEvent.KEYCODE_DPAD_LEFT:
-                              move("ArrowLeft");
-                              return true;
-                          case KeyEvent.KEYCODE_DPAD_RIGHT:
-                              move("ArrowRight");
-                              return true;
-                          case KeyEvent.KEYCODE_DPAD_UP:
-                              move("ArrowUp");
-                              return true;
-                          case KeyEvent.KEYCODE_DPAD_DOWN:
-                              move("ArrowDown");
-                              return true;
-                          case KeyEvent.KEYCODE_DPAD_CENTER:
-                          case KeyEvent.KEYCODE_ENTER:
-                          case KeyEvent.KEYCODE_NUMPAD_ENTER:
-                              clickFocused();
-                              return true;
-                      }
+              protected void onDestroy() {
+                  if (playerView != null) {
+                      playerView.setPlayer(null);
                   }
-                  return super.dispatchKeyEvent(event);
-              }
-
-              @Override
-              protected void onResume() {
-                  super.onResume();
-
-                  if (firstResume) {
-                      firstResume = false;
-                      return;
+                  if (player != null) {
+                      player.release();
+                      player = null;
                   }
-
-                  if (returningFromExternalApp) {
-                      returningFromExternalApp = false;
-                      backgrounded = false;
-                      if (webView != null) {
-                          webView.requestFocus();
-                          scheduleFocus();
-                      }
-                      return;
-                  }
-
-                  if (backgrounded) {
-                      backgrounded = false;
-                      refreshPage();
-                  }
-              }
-
-              @Override
-              protected void onStop() {
-                  super.onStop();
-                  backgrounded = true;
+                  super.onDestroy();
               }
 
               @Override
               public void onBackPressed() {
-                  String url = webView != null ? webView.getUrl() : null;
-
-                  if (webView != null &&
-                      webView.canGoBack() &&
-                      url != null &&
-                      !url.startsWith(HOME)) {
-                      webView.goBack();
-                      return;
-                  }
-
-                  finishAndRemoveTask();
-              }
-
-              public class Bridge {
-                  @JavascriptInterface
-                  public void play(final String url) {
-                      runOnUiThread(() -> openVideo(url));
-                  }
-
-                  @JavascriptInterface
-                  public void search(final String title) {
-                      runOnUiThread(() -> openKinoPubSearch(title));
-                  }
-
-                  @JavascriptInterface
-                  public void refresh() {
-                      runOnUiThread(() -> refreshPage());
-                  }
-
-                  @JavascriptInterface
-                  public void close() {
-                      runOnUiThread(() -> finishAndRemoveTask());
-                  }
-
-                  @JavascriptInterface
-                  public void restart() {
-                      runOnUiThread(() -> {
-                          Intent intent = getIntent();
-                          finish();
-                          overridePendingTransition(0, 0);
-                          startActivity(intent);
-                          overridePendingTransition(0, 0);
-                      });
-                  }
+                  finish();
               }
           }
           EOF
@@ -532,6 +125,4 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: kids-tv-v0.7
-          path: app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
+          name: kids-tv-v0.8
