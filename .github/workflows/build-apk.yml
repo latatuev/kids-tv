@@ -25,72 +25,29 @@ jobs:
         with:
           gradle-version: '8.7'
 
-      - name: Create Android project
+      - name: Generate Android project
         shell: bash
         run: |
-          mkdir -p app/src/main/java/com/latatuev/kidstv
-          mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/values
+          curl -fsSL "https://cmgdmsqcxrbwxghydmtb.supabase.co/functions/v1/kids-tv-android-build" -o /tmp/setup-kidstv.sh
+          bash /tmp/setup-kidstv.sh
 
-          cat > settings.gradle <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-          rootProject.name = 'KidsTV'
-          include ':app'
-          EOF
+      - name: Restore release keystore
+        shell: bash
+        env:
+          KIDSTV_KEYSTORE_BASE64: ${{ secrets.KIDSTV_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$KIDSTV_KEYSTORE_BASE64" | base64 --decode > kids-tv-release.jks
 
-          cat > build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application' version '8.5.2' apply false
-          }
-          EOF
+      - name: Build signed release APK
+        env:
+          KIDSTV_KEYSTORE_PASSWORD: ${{ secrets.KIDSTV_KEYSTORE_PASSWORD }}
+          KIDSTV_KEY_ALIAS: ${{ secrets.KIDSTV_KEY_ALIAS }}
+          KIDSTV_KEY_PASSWORD: ${{ secrets.KIDSTV_KEY_PASSWORD }}
+        run: gradle :app:assembleRelease --stacktrace
 
-          cat > gradle.properties <<'EOF'
-          android.useAndroidX=true
-          android.suppressUnsupportedCompileSdk=35
-          EOF
-
-          cat > app/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application'
-          }
-
-          android {
-              namespace 'com.latatuev.kidstv'
-              compileSdk 35
-
-              defaultConfig {
-                  applicationId 'com.latatuev.kidstv'
-                  minSdk 23
-                  targetSdk 35
-                  versionCode 8
-                  versionName '0.8'
-              }
-
-              signingConfigs {
-                  release {
-                      storeFile file('../kids-tv-release.jks')
-                      storePassword System.getenv('KIDSTV_KEYSTORE_PASSWORD')
-                      keyAlias System.getenv('KIDSTV_KEY_ALIAS')
-                      keyPassword System.getenv('KIDSTV_KEY_PASSWORD')
-                  }
-              }
-
-              buildTypes {
-                  release {
-                      minifyEnabled false
-                      signingConfig signingConfigs.release
-                  }
-              }
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: kids-tv-v0.8
+          path: app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
