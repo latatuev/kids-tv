@@ -17,6 +17,19 @@ check(providedSigningFields == 0 || providedSigningFields == releaseSigning.size
 }
 val releaseSigningAvailable = providedSigningFields == releaseSigning.size
 
+// Fail closed: an unsigned release must never be mistaken for an in-place upgrade.
+// The debug CI task remains available without any signing credentials.
+gradle.taskGraph.whenReady {
+    val releasePackaging = allTasks.any { task ->
+        task.name.endsWith("Release") &&
+            (task.name.startsWith("assemble") || task.name.startsWith("package") ||
+             task.name.startsWith("bundle"))
+    }
+    check(!releasePackaging || releaseSigningAvailable) {
+        "Lotus Executor release requires a persistent authorized signing key; refusing unsigned release"
+    }
+}
+
 android {
     namespace = "io.lotus.executor"
     compileSdk = 34
