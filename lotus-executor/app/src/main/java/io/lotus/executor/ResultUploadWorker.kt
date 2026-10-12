@@ -17,11 +17,14 @@ class ResultUploadWorker(context: Context, params: WorkerParameters) : Worker(co
     override fun doWork(): Result {
         val task = inputData.getString("task") ?: return Result.failure()
         val nonce = inputData.getString("nonce") ?: return Result.failure()
+        // Do not retry indefinitely while device is not yet paired or the server is unavailable.
+        if (PairingClient.deviceId(applicationContext) == null) return Result.failure()
+        if (runAttemptCount >= 12) return Result.failure()
         val timestamp = System.currentTimeMillis() / 1000
         return try {
             when (PairingClient.uploadPing(applicationContext, task, nonce, timestamp)) {
                 200 -> Result.success()
-                400, 403, 409 -> Result.failure()
+                400, 401, 403, 404, 409, 413, 415 -> Result.failure()
                 else -> Result.retry()
             }
         } catch (_: Exception) {
