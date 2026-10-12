@@ -2,7 +2,13 @@ name: Build Lotus Executor APK
 on:
   push:
     branches: [lotus-executor-apk-prototype]
+    paths:
+      - 'lotus-executor/**'
+      - '.github/workflows/lotus-executor-apk.yml'
   workflow_dispatch:
+concurrency:
+  group: lotus-executor-build-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
