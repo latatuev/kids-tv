@@ -1,0 +1,91 @@
+name: Lotus Executor · Stable signed release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lotus-executor-stable-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      LOTUS_EXECUTOR_STORE_PASSWORD: ${{ secrets.LOTUS_EXECUTOR_SIGNING_PASSWORD }}
+      LOTUS_EXECUTOR_KEY_PASSWORD: ${{ secrets.LOTUS_EXECUTOR_SIGNING_PASSWORD }}
+      LOTUS_EXECUTOR_KEY_ALIAS: lotus-executor-stable
+      KEYSTORE_BASE64: ${{ secrets.LOTUS_EXECUTOR_KEYSTORE_B64 }}
+      EXPECTED_CERT_SHA256: ${{ secrets.LOTUS_EXECUTOR_SIGNING_CERT_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: lotus-executor-apk-prototype
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK Platform 34
+        run: |
+          set -euo pipefail
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-34' 'build-tools;34.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Validate configured persistent signer
+        run: |
+          set -euo pipefail
+          umask 077
+          if [[ -z "$KEYSTORE_BASE64" || -z "$LOTUS_EXECUTOR_STORE_PASSWORD" || -z "$EXPECTED_CERT_SHA256" ]]; then
+            echo 'ERROR: Configure all three permanent GitHub Actions signing secrets before running this workflow.'
+            exit 78
+          fi
+          pinned="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          if [[ ! "$pinned" =~ ^[0-9a-f]{64}$ ]]; then
+            echo 'ERROR: Invalid pinned signing certificate SHA-256 fingerprint'
+            exit 78
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lotus-executor-stable.p12"
+          chmod 600 "$RUNNER_TEMP/lotus-executor-stable.p12"
+          if ! keytool -list -keystore "$RUNNER_TEMP/lotus-executor-stable.p12" -storepass "$LOTUS_EXECUTOR_STORE_PASSWORD" -alias "$LOTUS_EXECUTOR_KEY_ALIAS" > /dev/null 2>&1; then
+            echo 'ERROR: Keystore or key alias not valid'
+            exit 78
+          fi
+          echo "LOTUS_EXECUTOR_KEYSTORE_PATH=$RUNNER_TEMP/lotus-executor-stable.p12" >> "$GITHUB_ENV"
+      - name: Assemble stable-signed release APK
+        working-directory: lotus-executor
+        run: gradle --no-daemon :app:assembleRelease
+      - name: Verify signature and pin signing identity
+        run: |
+          set -euo pipefail
+          APK='lotus-executor/app/build/outputs/apk/release/app-release.apk'
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs "$APK" > "$RUNNER_TEMP/apk-signature-report"
+          if ! grep -q '^Verified using v2 scheme (APK Signature Scheme v2): true' "$RUNNER_TEMP/apk-signature-report"; then
+            echo 'ERROR: APK signature scheme v2 verification failed'
+            exit 1
+          fi
+          actual="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-signature-report" | head -1 | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          pinned="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          if [[ "$actual" != "$pinned" ]]; then
+            echo 'ERROR: Signing certificate differs from the pinned permanent identity'
+            exit 1
+          fi
+          echo 'Signature v2 verified and certificate matches pinned permanent identity'
+          "$ANDROID_HOME/build-tools/34.0.0/aapt" dump badging "$APK" | grep -m1 '^package:'
+          sha256sum "$APK"
+      - name: Upload stable signed APK (no keystore)
+        uses: actions/upload-artifact@v4
+        with:
+          name: lotus-executor-stable-signed
+          path: lotus-executor/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
+          if-no-files-found: error
+      - name: Remove temporary signing keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/lotus-executor-stable.p12" "$RUNNER_TEMP/apk-signature-report"
