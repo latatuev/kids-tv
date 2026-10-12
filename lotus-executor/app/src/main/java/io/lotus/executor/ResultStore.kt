@@ -7,7 +7,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-/** No network transmission. Private local record only. */
+/** Local-first result: writes atomically to app preferences, then queues upload. */
 object ResultStore {
     private const val KEY = "last_result"
     private const val TASK = "last_task"
@@ -16,19 +16,21 @@ object ResultStore {
     fun executePing(context: Context, task: LinkParser.TestTask): String {
         val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
         format.timeZone = TimeZone.getTimeZone("UTC")
-        val result = "Lotus Executor v0.2 — OK\n" +
+        val result = "Lotus Executor v0.3 — OK\n" +
             "Task: ${task.id}\n" +
             "Device: ${Build.MANUFACTURER} ${Build.MODEL}\n" +
             "Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n" +
             "UTC: ${format.format(Date())}\n" +
             "Operation: read-only device-info\n" +
-            "Return: local-only, server upload not yet configured"
+            "Return: queued for Lotus (requires approved pairing)"
         context.getSharedPreferences("executor_v02", Context.MODE_PRIVATE)
             .edit()
             .putString(KEY, result)
             .putString(TASK, task.id)
             .putLong(TIME, System.currentTimeMillis())
             .apply()
+        // Persistent queue; the phone may be offline or unpaired at this moment.
+        ResultUploadWorker.enqueue(context, task.id)
         return result
     }
 
