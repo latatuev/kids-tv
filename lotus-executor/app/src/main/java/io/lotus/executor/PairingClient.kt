@@ -75,7 +75,7 @@ object PairingClient {
         val fingerprint = result.getString("fingerprint")
         prefs(context).edit().putString("pairing_id", pairing)
             .putString("fingerprint", fingerprint).apply()
-        return "Заявка: " + pairing.take(8) + " · отпечаток: " + fingerprint.take(16) +
+        return "Заявка: " + pairing.take(8) + " · отпечаток: " + fingerprint +
                "\nОжидает подтверждения владельца"
     }
     fun checkPairing(context: Context): String {
