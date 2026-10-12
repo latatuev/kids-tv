@@ -40,6 +40,29 @@ jobs:
             exit 1
           fi
           grep -F 'Lotus Executor release requires a persistent authorized signing key' /tmp/lotus-executor-unsigned-release.log
+      - name: Verify release signing using throwaway CI-only key
+        working-directory: lotus-executor
+        run: |
+          set -euo pipefail
+          umask 077
+          export LOTUS_EXECUTOR_KEYSTORE_PATH="$RUNNER_TEMP/executor-ci-only.p12"
+          export LOTUS_EXECUTOR_STORE_PASSWORD="only-for-this-disposable-ci-key"
+          export LOTUS_EXECUTOR_KEY_PASSWORD="$LOTUS_EXECUTOR_STORE_PASSWORD"
+          export LOTUS_EXECUTOR_KEY_ALIAS="ci-test"
+          keytool -genkeypair -noprompt -storetype PKCS12 \
+            -keystore "$LOTUS_EXECUTOR_KEYSTORE_PATH" \
+            -storepass "$LOTUS_EXECUTOR_STORE_PASSWORD" \
+            -keypass "$LOTUS_EXECUTOR_KEY_PASSWORD" \
+            -alias "$LOTUS_EXECUTOR_KEY_ALIAS" -keyalg RSA -keysize 3072 \
+            -validity 1 -dname "CN=DISPOSABLE CI TEST ONLY"
+          gradle --no-daemon :app:assembleRelease
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs \
+            app/build/outputs/apk/release/app-release.apk > "$RUNNER_TEMP/executor-test-signature.txt"
+          grep -F 'Verified using v2 scheme (APK Signature Scheme v2): true' \
+            "$RUNNER_TEMP/executor-test-signature.txt"
+          rm -f "$LOTUS_EXECUTOR_KEYSTORE_PATH" \
+            "$RUNNER_TEMP/executor-test-signature.txt" \
+            app/build/outputs/apk/release/app-release.apk
       - name: Compute APK SHA256
         run: sha256sum lotus-executor/app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
