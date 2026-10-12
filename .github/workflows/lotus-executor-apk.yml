@@ -28,6 +28,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+      - name: Validate owner-side signing bootstrap syntax
+        run: bash -n lotus-executor/bootstrap-stable-signing.sh
       - name: Build debug APK
         working-directory: lotus-executor
         run: gradle --no-daemon :app:assembleDebug
