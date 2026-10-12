@@ -85,7 +85,9 @@ object PairingClient {
         val state = body.getString("status")
         if (state == "approved") {
             val device = body.getString("device_id")
-            prefs(context).edit().putString("device_id", device).apply()
+            val firstApproval = deviceId(context) == null
+            prefs(context).edit().putString("device_id", device).commit()
+            if (firstApproval) ResultStore.enqueueLastAfterPairing(context)
             return "Телефон зарегистрирован: " + device.take(8)
         }
         return "Регистрация: $state"
