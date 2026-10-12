@@ -54,7 +54,7 @@ class MainActivity : Activity() {
         }
 
         textLine("Lotus Executor", 28f)
-        textLine("v0.2 · быстрый тест без второго подтверждения", 16f)
+        textLine("v0.3 · быстрый тест + защищённая отправка на Lotus", 16f)
         status = textLine("Ожидание команды из ChatGPT.", 17f)
         val test = Button(this).apply {
             text = "Локальный тест (без подтверждения)"
@@ -65,6 +65,18 @@ class MainActivity : Activity() {
             }
         }
         root.addView(test, LinearLayout.LayoutParams(-1, dp(54)))
+        val pairing = Button(this).apply {
+            text = "Зарегистрировать телефон на Lotus"
+            isAllCaps = false
+            setOnClickListener { backgroundPairing { PairingClient.beginPairing(this@MainActivity) } }
+        }
+        root.addView(pairing, LinearLayout.LayoutParams(-1, dp(52)))
+        val checkPair = Button(this).apply {
+            text = "Проверить регистрацию"
+            isAllCaps = false
+            setOnClickListener { backgroundPairing { PairingClient.checkPairing(this@MainActivity) } }
+        }
+        root.addView(checkPair, LinearLayout.LayoutParams(-1, dp(52)))
         result = textLine("", 15f)
         copy = Button(this).apply {
             text = "Скопировать результат"
@@ -88,7 +100,16 @@ class MainActivity : Activity() {
             }
         }
         root.addView(share, LinearLayout.LayoutParams(-1, dp(52)))
-        textLine("Автоотправка на Lotus ещё не включена; результаты хранятся только на телефоне.", 14f).gravity = Gravity.CENTER
+        textLine("Результат сначала сохраняется на телефоне. Автоотправка работает после подтверждённой регистрации.", 14f).gravity = Gravity.CENTER
+    }
+
+    private fun backgroundPairing(action: () -> String) {
+        status.text = "Связываюсь с Lotus…"
+        Thread {
+            val message = try { action() }
+                catch (e: Exception) { "Нет соединения или ошибка регистрации: " + (e.message ?: "неизвестно") }
+            runOnUiThread { status.text = message }
+        }.start()
     }
 
     private fun refreshResult() {
