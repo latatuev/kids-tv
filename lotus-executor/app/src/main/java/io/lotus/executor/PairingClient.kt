@@ -18,7 +18,7 @@ import java.util.UUID
 /** The private P-256 key stays in Android Keystore. Never place Lotus admin credentials in APK. */
 object PairingClient {
     private const val ALIAS = "lotus_executor_result_key_v1"
-    private const val BASE = "https://lotus-135-106-163-200.sslip.io/executor/v1"
+    private const val BASE = "https://cmgdmsqcxrbwxghydmtb.supabase.co/functions/v1/lotus-executor-ingress"
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("executor_pair_v1", Context.MODE_PRIVATE)
     private fun b64(bytes: ByteArray) = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
     private fun nonce() = UUID.randomUUID().toString().replace("-", "")
