@@ -162,12 +162,13 @@ class OwnerSshActivity : Activity() {
             ))
             secret = OwnerSshKeys.privateKey(this)
             jsch.addIdentity("lotus-owner-device", secret, null, null)
-            secret.fill(0)
-            secret = null
             session = jsch.getSession(username, host, 22)
             session.setConfig("StrictHostKeyChecking", "yes")
             session.setConfig("PreferredAuthentications", "publickey")
             session.connect(15000)
+            // Erase temporary PEM bytes only after authentication has completed.
+            secret.fill(0)
+            secret = null
             channel = session.openChannel("exec") as ChannelExec
             channel.setCommand("python3 -")
             channel.setInputStream(ByteArrayInputStream(task.script.toByteArray(StandardCharsets.UTF_8)))
