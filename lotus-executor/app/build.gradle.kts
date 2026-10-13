@@ -38,8 +38,8 @@ android {
         applicationId = "io.lotus.executor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3"
+        versionCode = 4
+        versionName = "0.4-owner-ssh"
     }
 
     signingConfigs {
@@ -72,4 +72,5 @@ android {
 // Background retries persist even if the transient intent activity exits.
 dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("com.github.mwiede:jsch:2.28.8")
 }
