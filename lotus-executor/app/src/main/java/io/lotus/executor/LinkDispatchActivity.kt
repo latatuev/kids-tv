@@ -24,6 +24,19 @@ class LinkDispatchActivity : Activity() {
 
     private fun receive(incoming: Intent?) {
         if (incoming?.action != Intent.ACTION_VIEW) return
+        // New owner-SSH tasks are explicitly consented to in a non-exported screen.
+        // No command from an external Intent is automatically executed.
+        val ownerTask = OwnerScriptLink.parse(incoming.dataString)
+        if (ownerTask != null) {
+            val next = Intent(this, OwnerSshActivity::class.java).apply {
+                putExtra("original_url", incoming.dataString)
+                putExtra("task_id", ownerTask.id)
+                putExtra("task_script", ownerTask.script)
+                putExtra("task_sha256", ownerTask.sha256)
+            }
+            startActivity(next)
+            return
+        }
         val task = LinkParser.parse(incoming.dataString) ?: return
         ResultStore.executePing(this, task)
     }
