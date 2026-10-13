@@ -31,7 +31,7 @@ fixed=0
 for i,line in enumerate(lines):
     if 'raw=raw.replace(' in line and 'u007C' in line:
         indent=line[:len(line)-len(line.lstrip())]
-        lines[i]=indent+'raw=raw.replace("\\\\u007C","|").replace(String.valueOf((char)92)+(char)34,String.valueOf((char)34));'+"\\n"
+        lines[i]=indent+('raw=raw.replace(' + chr(34) + chr(92)*2 + 'u007C' + chr(34) + ',"|").replace(String.valueOf((char)92)+(char)34,String.valueOf((char)34));')+chr(10)
         fixed+=1
 assert fixed==1, "EXPECTED_ONE_KNOWN_JAVA_ESCAPE_BUG"
 main.write_text(''.join(lines))
