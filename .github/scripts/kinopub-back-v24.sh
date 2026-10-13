@@ -23,6 +23,19 @@ if 'EXPECTED_FRONTEND_BUILD="20261014.1"' in t:
     t=t.replace('EXPECTED_FRONTEND_BUILD="20261014.1"','EXPECTED_FRONTEND_BUILD="20261014.6"',1)
     main.write_text(t)
 
+# Repair one malformed escaped-quote replacement in the archived v0.23
+# MainActivity.java; earlier signed builds failed to compile at this line.
+t=main.read_text()
+lines=t.splitlines(keepends=True)
+fixed=0
+for i,line in enumerate(lines):
+    if 'raw=raw.replace(' in line and 'u007C' in line:
+        indent=line[:len(line)-len(line.lstrip())]
+        lines[i]=indent+'raw=raw.replace("\\\\u007C","|").replace(String.valueOf((char)92)+(char)34,String.valueOf((char)34));'+"\\n"
+        fixed+=1
+assert fixed==1, "EXPECTED_ONE_KNOWN_JAVA_ESCAPE_BUG"
+main.write_text(''.join(lines))
+
 # Arm only when Kids TV's native trampoline launches KinoPub.
 # No frontend changes needed.
 trampoline=java/"TrampolineActivity.java"
