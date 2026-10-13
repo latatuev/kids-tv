@@ -207,7 +207,7 @@ addon='''
 manifest.write_text(m.replace("</application>",addon+"</application>",1))
 
 assert "class KinoPubBackAccessibility" in (java/"KinoPubBackAccessibility.java").read_text()
-assert "FLAG_REQUEST_FILTER_KEY_EVENTS" in (java/"KinoPubBackAccessibility.java").read_text()
+assert "void onServiceConnected()" in (java/"KinoPubBackAccessibility.java").read_text()
 assert 'android:canRequestFilterKeyEvents="true"' in conf.read_text()
 assert 'android:accessibilityFlags="flagRequestFilterKeyEvents"' in conf.read_text()
 assert 'setServiceInfo(' not in (java/"KinoPubBackAccessibility.java").read_text()
