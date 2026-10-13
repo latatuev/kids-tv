@@ -120,9 +120,17 @@ class OwnerSshActivity : Activity() {
         label("Первоначальная настройка SSH — один раз:")
         val pub = label(OwnerSshKeys.publicKey(this).ifEmpty { "Ключ телефона ещё не создан." }, 12f)
             .apply { setTextIsSelectable(true) }
-        button("Создать SSH-ключ телефона") {
+        val keyFeedback = label(
+            if (OwnerSshKeys.hasIdentity(this)) "SSH-ключ телефона уже создан. Его можно скопировать ниже."
+            else "SSH-ключ ещё не создан. После подтверждения появится уведомление о ходе генерации.",
+            14f
+        )
+        var createKeyButton: Button? = null
+        createKeyButton = button("Создать SSH-ключ телефона") {
             if (OwnerSshKeys.hasIdentity(this)) {
                 pub.text = OwnerSshKeys.publicKey(this)
+                keyFeedback.text = "SSH-ключ уже существует. Он сохранён; новый ключ не создавался."
+                Toast.makeText(this, "Ключ уже создан — нажмите «Копировать публичный ключ»", Toast.LENGTH_LONG).show()
                 return@button
             }
             AlertDialog.Builder(this)
@@ -130,8 +138,30 @@ class OwnerSshActivity : Activity() {
                 .setMessage("Приватный ключ останется зашифрованным в памяти приложения. Публичный ключ потребуется один раз добавить на свой сервер через доверенный SSH-доступ.")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Создать") { _, _ ->
-                    try { pub.text = OwnerSshKeys.generateOnce(this) }
-                    catch (e: Exception) { state.text = "Ошибка ключа: ${e.message}" }
+                    keyFeedback.text = "Генерирую SSH-ключ телефона… Это может занять несколько секунд."
+                    createKeyButton?.isEnabled = false
+                    // RSA-3072 and Android Keystore initialization must never block the UI thread.
+                    Thread({
+                        val result = try {
+                            Result.success(OwnerSshKeys.generateOnce(applicationContext))
+                        } catch (e: Exception) {
+                            Result.failure<String>(e)
+                        }
+                        runOnUiThread {
+                            createKeyButton?.isEnabled = true
+                            result.fold(
+                                onSuccess = { key ->
+                                    pub.text = key
+                                    keyFeedback.text = "SSH-ключ создан и сохранён. Приватная часть остаётся на телефоне."
+                                    Toast.makeText(this, "SSH-ключ создан", Toast.LENGTH_LONG).show()
+                                },
+                                onFailure = { error ->
+                                    keyFeedback.text = "Ошибка создания SSH-ключа: ${error.javaClass.simpleName}: ${error.message ?: "нет подробностей"}"
+                                    Toast.makeText(this, "Не удалось создать SSH-ключ — причина показана под кнопкой", Toast.LENGTH_LONG).show()
+                                }
+                            )
+                        }
+                    }, "executor-ssh-keygen").start()
                 }.show()
         }
         button("Копировать публичный ключ") {
