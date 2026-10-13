@@ -24,7 +24,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: lotus-executor-apk-prototype
+          # Pin release sources to audited owner-SSH build, not a moving branch.
+          ref: 21614338107750cb2ac1923cf7dc7afe96580efc
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
