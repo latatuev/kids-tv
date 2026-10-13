@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Kids TV optional system-level Back return from KinoPub InfoActivity.
+# This patch extends clean v0.23 into v0.24. Android Accessibility activation is OPT-IN.
+python3 - <<'PY'
+from pathlib import Path
+
+root=Path("app/src/main")
+java=root/"java/com/latatuev/kidstv"
+manifest=root/"AndroidManifest.xml"
+gradle=Path("app/build.gradle")
+assert java.is_dir() and manifest.is_file() and gradle.is_file(), "ANDROID_PROJECT_MISSING"
+s=gradle.read_text()
+assert "versionCode 23" in s and "versionName '0.23'" in s, "UNEXPECTED_BASELINE"
+s=s.replace("versionCode 23","versionCode 24",1).replace("versionName '0.23'","versionName '0.24'",1)
+gradle.write_text(s)
+
+# v0.23 has an explicit version compatibility check. Keep it in sync with
+# the deployed Kids TV frontend (without forcing an APK rebuild for every later web update).
+main=java/"MainActivity.java"
+t=main.read_text()
+if 'EXPECTED_FRONTEND_BUILD="20261014.1"' in t:
+    t=t.replace('EXPECTED_FRONTEND_BUILD="20261014.1"','EXPECTED_FRONTEND_BUILD="20261014.6"',1)
+    main.write_text(t)
+
+(java/"KinoPubBackGateReceiver.java").write_text(r'''package com.latatuev.kidstv;
+
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+
+public final class KinoPubBackGateReceiver extends BroadcastReceiver {
+    public static final String ARM = "com.latatuev.kidstv.ARM_KINOPUB_BACK";
+    public static final String DISARM = "com.latatuev.kidstv.DISARM_KINOPUB_BACK";
+    public static final String PREFS = "kidstv_kinopub_back";
+    @Override public void onReceive(Context context, Intent intent) {
+        if (intent == null) return;
+        final String action=intent.getAction();
+        SharedPreferences p=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
+        if (ARM.equals(action)) {
+            // Arm for this particular Kids TV initiated launch, not general KinoPub usage.
+            p.edit().putLong("expires",System.currentTimeMillis()+3L*60L*60L*1000L)
+                .putBoolean("armed",true).apply();
+        } else if (DISARM.equals(action)) {
+            p.edit().putBoolean("armed",false).remove("expires").apply();
+        }
+    }
+}
+''')
+
+(java/"KinoPubBackAccessibility.java").write_text(r'''package com.latatuev.kidstv;
+
+import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.view.KeyEvent;
+import android.view.accessibility.AccessibilityEvent;
+import org.json.JSONObject;
+
+/**
+ * Optional user-enabled TV Back integration. Never reads window content,
+ * gestures, touch targets, titles, passwords, or other applications' UI data.
+ *
+ * Observes only active package and Android class name; consumes Back solely
+ * when the foreground is KinoPub's detail InfoActivity and Kids TV armed it.
+ */
+public final class KinoPubBackAccessibility extends AccessibilityService {
+    private String activePackage="";
+    private String activeClass="";
+    private boolean consumeKeyUp=false;
+    private String lastReportedClass="";
+
+    @Override protected void onServiceConnected() {
+        super.onServiceConnected();
+        AccessibilityServiceInfo i=getServiceInfo();
+        if(i!=null){
+            i.eventTypes=AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
+            i.feedbackType=AccessibilityServiceInfo.FEEDBACK_GENERIC;
+            i.notificationTimeout=0;
+            i.flags |= AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS;
+            setServiceInfo(i);
+        }
+    }
+
+    private SharedPreferences preferences(){
+        return getSharedPreferences(KinoPubBackGateReceiver.PREFS,MODE_PRIVATE);
+    }
+
+    private boolean armed(){
+        SharedPreferences p=preferences();
+        return p.getBoolean("armed",false)
+            && System.currentTimeMillis()<p.getLong("expires",0L);
+    }
+
+    private void disarm(){
+        preferences().edit().putBoolean("armed",false).remove("expires").apply();
+    }
+
+    private static String value(CharSequence text){
+        return text==null?"":text.toString();
+    }
+
+    @Override public void onAccessibilityEvent(AccessibilityEvent event){
+        if(event==null || event.getEventType()!=AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED)return;
+        activePackage=value(event.getPackageName());
+        activeClass=value(event.getClassName());
+        if("com.kinopub".equals(activePackage) && armed()
+                && !activeClass.equals(lastReportedClass)){
+            lastReportedClass=activeClass;
+            try{RemoteControlService.diag("kinopub_back_window",
+                new JSONObject().put("activity_class",activeClass));}
+            catch(Exception ignored){}
+        }
+    }
+
+    @Override protected boolean onKeyEvent(KeyEvent e){
+        if(e==null || e.getKeyCode()!=KeyEvent.KEYCODE_BACK)return false;
+        if(consumeKeyUp){
+            if(e.getAction()==KeyEvent.ACTION_UP)consumeKeyUp=false;
+            return true;
+        }
+        if(e.getAction()!=KeyEvent.ACTION_DOWN || e.getRepeatCount()!=0)return false;
+        if(!"com.kinopub".equals(activePackage)
+            || !activeClass.endsWith(".InfoActivity")
+            || !armed())return false;
+        disarm();  // One-shot: no effect on any subsequent normal KinoPub session.
+        consumeKeyUp=true;
+        try{
+            RemoteControlService.diag("kinopub_back_intercepted",
+                new JSONObject().put("activity_class",activeClass));
+        }catch(Exception ignored){}
+        try{
+            Intent i=new Intent(this,MainActivity.class);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                |Intent.FLAG_ACTIVITY_CLEAR_TOP
+                |Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(i);
+            return true;
+        }catch(Exception error){
+            consumeKeyUp=false;
+            return false;
+        }
+    }
+
+    @Override public void onInterrupt(){}
+}
+''')
+
+strings=root/"res/values/kidstv_back_strings.xml"
+strings.parent.mkdir(parents=True,exist_ok=True)
+strings.write_text('''<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="kinopub_back_service_title">Kids TV — возврат из KinoPub</string>
+    <string name="kinopub_back_service_desc">Возвращает в Kids TV по кнопке Назад только из карточки KinoPub, открытой через Kids TV. Не читает содержимое экрана.</string>
+</resources>
+''')
+conf=root/"res/xml/kidstv_kinopub_back.xml"
+conf.parent.mkdir(parents=True,exist_ok=True)
+conf.write_text('''<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="0"
+    android:canRequestFilterKeyEvents="true"
+    android:description="@string/kinopub_back_service_desc" />
+''')
+
+m=manifest.read_text()
+assert ".KinoPubBackGateReceiver" not in m, "PATCH_ALREADY_APPLIED"
+assert "</application>" in m, "MANIFEST_APPLICATION_NOT_FOUND"
+addon='''        <receiver android:name=".KinoPubBackGateReceiver"
+            android:enabled="true" android:exported="false" />
+        <service
+            android:name=".KinoPubBackAccessibility"
+            android:label="@string/kinopub_back_service_title"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice"
+                android:resource="@xml/kidstv_kinopub_back" />
+        </service>
+'''
+manifest.write_text(m.replace("</application>",addon+"</application>",1))
+
+assert "class KinoPubBackAccessibility" in (java/"KinoPubBackAccessibility.java").read_text()
+assert "FLAG_REQUEST_FILTER_KEY_EVENTS" in (java/"KinoPubBackAccessibility.java").read_text()
+assert 'android:canRequestFilterKeyEvents="true"' in conf.read_text()
+assert 'android:exported="false"' in manifest.read_text()
+print("KIDSTV_V24_OPTIONAL_KINOPUB_ACCESSIBILITY_PATCH_OK")
+PY
