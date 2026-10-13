@@ -31,6 +31,10 @@ jobs:
           curl -fsSL "https://cmgdmsqcxrbwxghydmtb.supabase.co/functions/v1/kids-tv-android-build" -o /tmp/setup-kidstv.sh
           bash /tmp/setup-kidstv.sh
 
+      - name: Add optional KinoPub Back integration
+        shell: bash
+        run: bash .github/scripts/kinopub-back-v24.sh
+
       - name: Restore release keystore
         shell: bash
         env:
@@ -48,6 +52,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: kids-tv-v0.8
+          name: kids-tv-v0.24
           path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
