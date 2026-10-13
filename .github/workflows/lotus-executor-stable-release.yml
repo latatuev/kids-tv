@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # Pin release sources to audited owner-SSH build, not a moving branch.
-          ref: 21614338107750cb2ac1923cf7dc7afe96580efc
+          ref: b9a63def51514565843785c2592198ef07d5c861
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
