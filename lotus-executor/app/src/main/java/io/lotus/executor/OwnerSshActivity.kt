@@ -5,7 +5,9 @@ import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.widget.Button
@@ -65,19 +67,44 @@ class OwnerSshActivity : Activity() {
     private fun draw() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 32, 24, 26)
+            setPadding(dp(16), dp(18), dp(16), dp(20))
         }
         val scroll = ScrollView(this)
         scroll.addView(root)
         setContentView(scroll)
         fun label(s: String, sp: Float = 15f): TextView {
-            val t = TextView(this).apply { text = s; textSize = sp; setPadding(0, 7, 0, 9) }
+            val t = TextView(this).apply {
+                text = s
+                textSize = sp
+                setTextColor(Color.rgb(27, 39, 55))
+                setPadding(0, dp(6), 0, dp(7))
+            }
             root.addView(t)
             return t
         }
         fun button(text: String, action: () -> Unit): Button {
-            val b = Button(this).apply { this.text = text; isAllCaps = false; setOnClickListener { action() } }
-            root.addView(b, LinearLayout.LayoutParams(-1, 58))
+            // Use density-independent height and explicit contrast: on Samsung/Android
+            // 16, a 58-pixel platform Button clipped all the text, showing grey bars.
+            val bg = GradientDrawable().apply {
+                setColor(Color.rgb(24, 95, 194))
+                cornerRadius = dp(10).toFloat()
+            }
+            val b = Button(this).apply {
+                this.text = text
+                textSize = 14f
+                isAllCaps = false
+                setTextColor(Color.WHITE)
+                isSingleLine = false
+                minHeight = dp(50)
+                minimumHeight = dp(50)
+                background = bg
+                setPadding(dp(10), dp(7), dp(10), dp(7))
+                setOnClickListener { action() }
+            }
+            root.addView(b, LinearLayout.LayoutParams(-1, dp(54)).apply {
+                topMargin = dp(4)
+                bottomMargin = dp(4)
+            })
             return b
         }
         label("Lotus Executor · SSH владельца", 23f)
@@ -201,6 +228,8 @@ class OwnerSshActivity : Activity() {
             runOnUiThread { run.isEnabled = false }
         }
     }
+
+    private fun dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
     private class CappedOutput : OutputStream() {
         private val data = ByteArrayOutputStream()
