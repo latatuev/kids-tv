@@ -23,31 +23,21 @@ if 'EXPECTED_FRONTEND_BUILD="20261014.1"' in t:
     t=t.replace('EXPECTED_FRONTEND_BUILD="20261014.1"','EXPECTED_FRONTEND_BUILD="20261014.6"',1)
     main.write_text(t)
 
-(java/"KinoPubBackGateReceiver.java").write_text(r'''package com.latatuev.kidstv;
-
-import android.content.BroadcastReceiver;
-import android.content.Context;
-import android.content.Intent;
-import android.content.SharedPreferences;
-
-public final class KinoPubBackGateReceiver extends BroadcastReceiver {
-    public static final String ARM = "com.latatuev.kidstv.ARM_KINOPUB_BACK";
-    public static final String DISARM = "com.latatuev.kidstv.DISARM_KINOPUB_BACK";
-    public static final String PREFS = "kidstv_kinopub_back";
-    @Override public void onReceive(Context context, Intent intent) {
-        if (intent == null) return;
-        final String action=intent.getAction();
-        SharedPreferences p=context.getSharedPreferences(PREFS,Context.MODE_PRIVATE);
-        if (ARM.equals(action)) {
-            // Arm for this particular Kids TV initiated launch, not general KinoPub usage.
-            p.edit().putLong("expires",System.currentTimeMillis()+3L*60L*60L*1000L)
-                .putBoolean("armed",true).apply();
-        } else if (DISARM.equals(action)) {
-            p.edit().putBoolean("armed",false).remove("expires").apply();
-        }
-    }
-}
-''')
+# Arm only when Kids TV's native trampoline launches KinoPub.
+# No frontend changes needed.
+trampoline=java/"TrampolineActivity.java"
+t=trampoline.read_text()
+launch='JSONObject result=IntentTools.launchWithFallbacks(this,spec,vars);'
+assert t.count(launch)==1, "TRAMPOLINE_LAUNCH_SITE_UNEXPECTED"
+arm='''if ("com.kinopub".equals(spec.optString("package",""))) {
+                getSharedPreferences("kidstv_kinopub_back", MODE_PRIVATE).edit()
+                    .putBoolean("armed",true)
+                    .putLong("expires",System.currentTimeMillis()+3L*60L*60L*1000L)
+                    .apply();
+            }
+            '''
+t=t.replace(launch,arm+launch,1)
+trampoline.write_text(t)
 
 (java/"KinoPubBackAccessibility.java").write_text(r'''package com.latatuev.kidstv;
 
@@ -85,7 +75,7 @@ public final class KinoPubBackAccessibility extends AccessibilityService {
     }
 
     private SharedPreferences preferences(){
-        return getSharedPreferences(KinoPubBackGateReceiver.PREFS,MODE_PRIVATE);
+        return getSharedPreferences("kidstv_kinopub_back",MODE_PRIVATE);
     }
 
     private boolean armed(){
@@ -168,10 +158,9 @@ conf.write_text('''<?xml version="1.0" encoding="utf-8"?>
 ''')
 
 m=manifest.read_text()
-assert ".KinoPubBackGateReceiver" not in m, "PATCH_ALREADY_APPLIED"
+assert ".KinoPubBackAccessibility" not in m, "PATCH_ALREADY_APPLIED"
 assert "</application>" in m, "MANIFEST_APPLICATION_NOT_FOUND"
-addon='''        <receiver android:name=".KinoPubBackGateReceiver"
-            android:enabled="true" android:exported="false" />
+addon='''
         <service
             android:name=".KinoPubBackAccessibility"
             android:label="@string/kinopub_back_service_title"
@@ -189,6 +178,6 @@ manifest.write_text(m.replace("</application>",addon+"</application>",1))
 assert "class KinoPubBackAccessibility" in (java/"KinoPubBackAccessibility.java").read_text()
 assert "FLAG_REQUEST_FILTER_KEY_EVENTS" in (java/"KinoPubBackAccessibility.java").read_text()
 assert 'android:canRequestFilterKeyEvents="true"' in conf.read_text()
-assert 'android:exported="false"' in manifest.read_text()
+assert 'KinoPubBackAccessibility' in manifest.read_text()
 print("KIDSTV_V24_OPTIONAL_KINOPUB_ACCESSIBILITY_PATCH_OK")
 PY
