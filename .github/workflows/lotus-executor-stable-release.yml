@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # Pin release sources to audited owner-SSH build, not a moving branch.
-          ref: 29f3c1739ec746730e5c8af54da06798d812fbec
+          ref: 0d4f264b9475ac5c537662089061ec23b4741388
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
