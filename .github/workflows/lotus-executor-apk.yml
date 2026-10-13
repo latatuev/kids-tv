@@ -1,7 +1,7 @@
 name: Build Lotus Executor APK
 on:
   push:
-    branches: [lotus-executor-apk-prototype]
+    branches: [lotus-executor-apk-prototype, lotus-executor-owner-ssh-prototype]
     paths:
       - 'lotus-executor/**'
       - '.github/workflows/lotus-executor-apk.yml'
