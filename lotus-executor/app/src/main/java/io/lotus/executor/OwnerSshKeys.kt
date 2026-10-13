@@ -45,6 +45,37 @@ object OwnerSshKeys {
 
     fun publicKey(ctx: Context) = prefs(ctx).getString(PUBLIC, "") ?: ""
 
+    /** Reports whether the stored SSH identity is actually decryptable, not merely present. */
+    sealed class IdentityStatus {
+        object Absent : IdentityStatus()
+        data class Ready(val publicKey: String) : IdentityStatus()
+        data class Unusable(val reason: String) : IdentityStatus()
+    }
+
+    fun inspectIdentity(ctx: Context): IdentityStatus {
+        val hasPrivate = hasIdentity(ctx)
+        val pub = publicKey(ctx)
+        if (!hasPrivate && pub.isBlank()) return IdentityStatus.Absent
+        if (!hasPrivate || !pub.startsWith("ssh-rsa ")) {
+            return IdentityStatus.Unusable("Данные ключа неполные. Существующий ключ не заменён.")
+        }
+        return try {
+            val secret = privateKey(ctx)
+            try {
+                // Confirm that Android Keystore still decrypts the stored SSH key.
+                if (secret.isEmpty() || !secret.toString(Charsets.US_ASCII).startsWith("-----BEGIN ")) {
+                    IdentityStatus.Unusable("Приватный ключ имеет неверный формат.")
+                } else {
+                    IdentityStatus.Ready(pub)
+                }
+            } finally {
+                secret.fill(0)
+            }
+        } catch (e: Exception) {
+            IdentityStatus.Unusable("Не удалось прочитать ключ: ${e.javaClass.simpleName}.")
+        }
+    }
+
     @Synchronized
     fun generateOnce(ctx: Context): String {
         if (hasIdentity(ctx)) return publicKey(ctx)
@@ -78,7 +109,11 @@ object OwnerSshKeys {
         val bytes = Base64.decode(wrapped, Base64.NO_WRAP)
         check(bytes.size > 28) { "Invalid encrypted key" }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, aesKey(), GCMParameterSpec(128, bytes, 0, 12))
+        // Never silently generate a replacement AES key while inspecting an existing identity.
+        val store = KeyStore.getInstance("AndroidKeyStore").also { it.load(null) }
+        val existing = store.getKey(ALIAS, null) as? SecretKey
+            ?: error("Android Keystore key is missing")
+        cipher.init(Cipher.DECRYPT_MODE, existing, GCMParameterSpec(128, bytes, 0, 12))
         return cipher.doFinal(bytes.copyOfRange(12, bytes.size))
     }
 
