@@ -34,6 +34,7 @@ class OwnerSshActivity : Activity() {
     private lateinit var state: TextView
     private lateinit var output: TextView
     private lateinit var run: Button
+    private lateinit var copyResult: Button
     private val host = "135.106.163.200"
     private val username = "sergey"
     private val prefs by lazy { getSharedPreferences("lotus-owner-ssh-runs", Context.MODE_PRIVATE) }
@@ -182,6 +183,17 @@ class OwnerSshActivity : Activity() {
         }
         state = label("Из ссылки ничего автоматически не выполняется.")
         output = label("", 12f).apply { setTextIsSelectable(true); typeface = Typeface.MONOSPACE }
+        // Copy exactly the displayed task result, including SSH status and stderr,
+        // without copying the executable Python script or any private SSH material.
+        copyResult = button("Копировать результат") {
+            val report = output.text.toString()
+            if (report.isNotBlank()) {
+                copy("Задача: ${task.id}\n${state.text}\n\n$report")
+            } else {
+                Toast.makeText(this, "Результата пока нет", Toast.LENGTH_SHORT).show()
+            }
+        }
+        copyResult.isEnabled = false
         run = button("Подтвердить и выполнить на Lotus") {
             if (!OwnerSshKeys.hasIdentity(this) || OwnerSshKeys.knownHosts(this).isEmpty()) {
                 state.text = "Сначала настройте SSH-ключ телефона и проверенный ключ сервера."
@@ -203,6 +215,8 @@ class OwnerSshActivity : Activity() {
                     }
                     run.isEnabled = false
                     state.text = "Подключение к Lotus…"
+                    output.text = ""
+                    copyResult.isEnabled = false
                     Thread({ execute() }, "owner-ssh-exec").start()
                 }.show()
         }
@@ -245,11 +259,13 @@ class OwnerSshActivity : Activity() {
             runOnUiThread {
                 state.text = if (status == 0) "Команда завершилась успешно" else "Команда завершилась с ошибкой: $status"
                 output.text = report
+                copyResult.isEnabled = true
             }
         } catch (e: Exception) {
             runOnUiThread {
                 state.text = "Выполнение не подтверждено: ${e.javaClass.simpleName}"
                 output.text = (e.message ?: "Ошибка соединения").take(700)
+                copyResult.isEnabled = true
             }
         } finally {
             secret?.fill(0)
