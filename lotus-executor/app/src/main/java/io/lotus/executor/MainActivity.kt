@@ -1,6 +1,7 @@
 package io.lotus.executor
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -9,6 +10,7 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
+import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -21,6 +23,11 @@ class MainActivity : Activity() {
     private lateinit var result: TextView
     private lateinit var copy: Button
     private lateinit var share: Button
+    private lateinit var sshStatus: TextView
+    private lateinit var sshCreate: Button
+    private lateinit var sshCopy: Button
+    private var sshBusy = false
+    private var sshCheckVersion = 0
     private var lastResult = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,6 +38,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         refreshResult()
+        refreshSshIdentity()
     }
 
     private fun createUi() {
@@ -66,7 +74,34 @@ class MainActivity : Activity() {
         }
 
         textLine("Lotus Executor", 28f)
-        textLine("v0.3 · быстрый тест + защищённая отправка на Lotus", 16f)
+        textLine("v0.7 · управление ключом телефона", 16f)
+        textLine("SSH-ключ телефона", 21f)
+        sshStatus = textLine("Проверяю, создан ли ключ…", 16f)
+        sshCreate = Button(this).apply {
+            text = "Создать SSH-ключ"
+            isAllCaps = false
+            isEnabled = false
+            setOnClickListener { confirmCreateSshKey() }
+        }
+        root.addView(styleAction(sshCreate), LinearLayout.LayoutParams(-1, dp(54)))
+        sshCopy = Button(this).apply {
+            text = "Копировать публичный ключ"
+            isAllCaps = false
+            isEnabled = false
+            visibility = View.GONE
+            setOnClickListener {
+                val key = OwnerSshKeys.publicKey(this@MainActivity)
+                if (key.startsWith("ssh-rsa ")) {
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Публичный SSH-ключ Lotus Executor", key))
+                    Toast.makeText(this@MainActivity, "Публичный ключ скопирован", Toast.LENGTH_SHORT).show()
+                } else {
+                    refreshSshIdentity()
+                }
+            }
+        }
+        root.addView(styleAction(sshCopy), LinearLayout.LayoutParams(-1, dp(54)))
+        textLine("Приватный ключ остаётся на телефоне. Для разрешения SSH-доступа публичный ключ нужно отдельно добавить на Lotus.", 13f)
         status = textLine("Ожидание команды из ChatGPT.", 17f)
         val test = Button(this).apply {
             text = "Локальный тест (без подтверждения)"
@@ -113,6 +148,87 @@ class MainActivity : Activity() {
         }
         root.addView(styleAction(share), LinearLayout.LayoutParams(-1, dp(52)))
         textLine("Результат сначала сохраняется на телефоне. Автоотправка работает после подтверждённой регистрации.", 14f).gravity = Gravity.CENTER
+    }
+
+    private fun refreshSshIdentity() {
+        if (sshBusy) return
+        sshBusy = true
+        val version = ++sshCheckVersion
+        sshStatus.text = "Проверяю сохранённый ключ…"
+        sshCreate.isEnabled = false
+        sshCopy.isEnabled = false
+        Thread({
+            val identity = try {
+                OwnerSshKeys.inspectIdentity(applicationContext)
+            } catch (e: Exception) {
+                OwnerSshKeys.IdentityStatus.Unusable("Ошибка проверки: ${e.javaClass.simpleName}")
+            }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed && version == sshCheckVersion) {
+                    showSshIdentity(identity)
+                }
+            }
+        }, "executor-ssh-identity-check").start()
+    }
+
+    private fun showSshIdentity(identity: OwnerSshKeys.IdentityStatus) {
+        sshBusy = false
+        when (identity) {
+            is OwnerSshKeys.IdentityStatus.Absent -> {
+                sshStatus.text = "SSH-ключ ещё не создан."
+                sshCreate.visibility = View.VISIBLE
+                sshCreate.isEnabled = true
+                sshCopy.visibility = View.GONE
+            }
+            is OwnerSshKeys.IdentityStatus.Ready -> {
+                sshStatus.text = "SSH-ключ уже создан ✓\nПриватный ключ проверен и доступен на телефоне."
+                sshCreate.visibility = View.GONE
+                sshCopy.visibility = View.VISIBLE
+                sshCopy.isEnabled = true
+            }
+            is OwnerSshKeys.IdentityStatus.Unusable -> {
+                sshStatus.text = "Обнаружен сохранённый ключ, но он недоступен. ${identity.reason}\nАвтоматически заменять его нельзя."
+                sshCreate.visibility = View.VISIBLE
+                sshCreate.isEnabled = false
+                sshCopy.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun confirmCreateSshKey() {
+        if (sshBusy) return
+        if (OwnerSshKeys.hasIdentity(this)) {
+            // Never overwrite an existing SSH identity; verify it and explain its state.
+            refreshSshIdentity()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Создать SSH-ключ телефона?")
+            .setMessage("Приватный ключ будет храниться зашифрованным на телефоне. Серверу потребуется только публичный ключ. Существующие ключи не заменяются.")
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Создать") { _, _ ->
+                sshBusy = true
+                val version = ++sshCheckVersion
+                sshCreate.isEnabled = false
+                sshStatus.text = "Создаю ключ…"
+                Thread({
+                    val identity = try {
+                        OwnerSshKeys.generateOnce(applicationContext)
+                        OwnerSshKeys.inspectIdentity(applicationContext)
+                    } catch (e: Exception) {
+                        OwnerSshKeys.IdentityStatus.Unusable("Ошибка создания: ${e.javaClass.simpleName}: ${e.message ?: "нет подробностей"}")
+                    }
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed && version == sshCheckVersion) {
+                            showSshIdentity(identity)
+                            if (identity is OwnerSshKeys.IdentityStatus.Ready) {
+                                Toast.makeText(this, "SSH-ключ телефона готов", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    }
+                }, "executor-ssh-identity-create").start()
+            }
+            .show()
     }
 
     private fun backgroundPairing(action: () -> String) {
