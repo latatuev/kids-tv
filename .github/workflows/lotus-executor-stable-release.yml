@@ -2,6 +2,11 @@ name: Lotus Executor · Stable signed release
 
 on:
   workflow_dispatch:
+  # A reviewed pin update builds its own stable, permanently signed APK.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/lotus-executor-stable-release.yml'
 
 permissions:
   contents: read
@@ -25,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # Pin release sources to audited owner-SSH build, not a moving branch.
-          ref: b9a63def51514565843785c2592198ef07d5c861
+          ref: 8e00eefa11b5bea1b70bbe708bdec0803fc3ff7f
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
