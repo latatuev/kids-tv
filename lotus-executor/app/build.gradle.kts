@@ -38,8 +38,8 @@ android {
         applicationId = "io.lotus.executor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.4-owner-ssh"
+        versionCode = 5
+        versionName = "0.5-owner-ssh-ui"
     }
 
     signingConfigs {
