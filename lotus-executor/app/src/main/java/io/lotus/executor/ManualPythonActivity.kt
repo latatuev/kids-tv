@@ -96,6 +96,8 @@ class ManualPythonActivity : Activity() {
 
         label("Lotus Executor · Python", 23f)
         label("Ручной ввод · $username@$host. Выполнение только после отдельного подтверждения.", 13f)
+        run = button("Проверить и выполнить на Lotus") { confirmAndRun() }
+        state = label("Код не выполнялся. SSH-ключ остаётся на телефоне.", 14f)
         label("Python-код (передаётся как python3 -):")
         editor = EditText(this).apply {
             hint = "Вставьте сюда Python-код…"
@@ -112,8 +114,6 @@ class ManualPythonActivity : Activity() {
         }
         root.addView(editor, LinearLayout.LayoutParams(-1, -2))
 
-        state = label("Код не выполнялся. SSH-ключ остаётся на телефоне.", 14f)
-        run = button("Проверить и выполнить на Lotus") { confirmAndRun() }
         output = label("", 12f).apply {
             typeface = Typeface.MONOSPACE
             setTextIsSelectable(true)
@@ -228,14 +228,29 @@ class ManualPythonActivity : Activity() {
                 stdout.asText() +
                 if (stderr.asText().isNotEmpty()) "\nSTDERR:\n" + stderr.asText() else ""
             runOnUiThread {
-                state.text = if (exit == 0) "Команда завершилась успешно" else
-                    "Команда завершилась с ошибкой: $exit"
                 output.text = report
                 copyResult.isEnabled = true
+                if (exit == 0) {
+                    try {
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText(
+                            "Lotus Executor result", "Задача: $taskId\nКоманда завершилась успешно\n\n$report"
+                        ))
+                        state.text = "Выполнено успешно, результат скопирован в буфер"
+                        state.setTextColor(Color.rgb(20, 125, 70))
+                    } catch (e: Exception) {
+                        state.text = "Команда выполнена, но результат не скопирован. Нажмите «Копировать результат»."
+                        state.setTextColor(Color.rgb(151, 85, 12))
+                    }
+                } else {
+                    state.text = "Команда завершилась с ошибкой: $exit"
+                    state.setTextColor(Color.rgb(170, 36, 36))
+                }
             }
         } catch (e: Exception) {
             runOnUiThread {
                 state.text = "Результат выполнения не подтверждён: ${e.javaClass.simpleName}"
+                state.setTextColor(Color.rgb(170, 36, 36))
                 output.text = (e.message ?: "Ошибка соединения").take(700)
                 copyResult.isEnabled = true
             }
