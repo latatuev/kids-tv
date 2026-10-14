@@ -74,7 +74,7 @@ class MainActivity : Activity() {
         }
 
         textLine("Lotus Executor", 28f)
-        textLine("v0.10 · Python, SSH и sudo с подтверждением", 16f)
+        textLine("v0.11 · исправлен sudo при use_pty", 16f)
         val manualPython = Button(this).apply {
             text = "Ввести Python-код для Lotus"
             isAllCaps = false
