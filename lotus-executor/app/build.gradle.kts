@@ -38,8 +38,8 @@ android {
         applicationId = "io.lotus.executor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "0.11-sudo-stream-fix"
+        versionCode = 12
+        versionName = "0.12-sudo-prompt-handshake"
     }
 
     signingConfigs {
