@@ -8,14 +8,14 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
-import java.util.UUID
 
 /**
  * Dedicated, user-confirmed SSH execution. Elevated mode is never selected
  * by a remote link. Only an on-device masked password dialog enables sudo.
  *
- * Password travels once via SSH stdin to sudo -S. The Python body is withheld
- * until a unique root-side readiness marker is actually observed.
+ * A signed, fixed Python relay uses subprocess(sudo) on Lotus. Password and
+ * user script are provided ONLY through SSH stdin, never argv or disk. The
+ * relay does not forward user code to root before authenticated readiness.
  */
 object SshRunner {
     data class Result(val exit: Int, val stdout: String, val stderr: String)
@@ -26,7 +26,7 @@ object SshRunner {
         var session: Session? = null
         var channel: ChannelExec? = null
         var privateKey: ByteArray? = null
-        var input: OutputStream? = null
+        var elevatedPacket: ByteArray? = null
         val scriptBytes = script.toByteArray(StandardCharsets.UTF_8)
         try {
             val jsch = JSch()
@@ -52,70 +52,21 @@ object SshRunner {
                 channel.setInputStream(ByteArrayInputStream(scriptBytes))
                 channel.connect(15000)
             } else {
-                val nonce = UUID.randomUUID().toString().replace("-", "")
-                val prompt = "LOTUS_SUDO_PROMPT_" + nonce
-                val marker = "LOTUS_SUDO_READY_" + nonce
-                // The prompt is a distinct handshake message from sudo itself.
-                // Only after receiving it do we send a password. The root marker
-                // is emitted by the authenticated shell, BEFORE receiving Python.
-                // No SSH PTY is requested: terminal echo must not expose passwords.
-                channel.setCommand(
-                    "sudo -k -S -p '$prompt' -- /bin/sh -c 'printf $marker; exec python3 -'"
-                )
-                input = channel.outputStream
+                // Proven non-interactive Python SSH stdin path, with sudo handled
+                // as a local subprocess on Lotus. No JSch prompt interception.
+                val request = SudoPythonBridge.create(context, sudoPassword, scriptBytes)
+                elevatedPacket = request.payload
+                channel.setCommand(request.command)
+                channel.setInputStream(ByteArrayInputStream(request.payload))
                 channel.connect(15000)
-                val promptDeadline = System.currentTimeMillis() + 10000
-                while (!channel.isClosed && !SudoHandshake.confirmed(
-                        stdout.asText(), stderr.asText(), prompt
-                    ) && !SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)) {
-                    if (System.currentTimeMillis() >= promptDeadline) {
-                        throw IllegalStateException("SUDO_PROMPT_TIMEOUT")
-                    }
-                    Thread.sleep(80)
-                }
-                val prompted = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), prompt)
-                var ready = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)
-                if (prompted && !ready) {
-                    input.write(sudoPassword)
-                    input.flush()
-                    sudoPassword.fill(0)
-                    val authDeadline = System.currentTimeMillis() + 15000
-                    while (!channel.isClosed && !ready) {
-                        val outNow = stdout.asText()
-                        val errNow = stderr.asText()
-                        // A second custom password prompt is definitive refusal.
-                        if (SudoHandshake.passwordRejected(outNow, errNow) ||
-                            SudoHandshake.occurrences(outNow, errNow, prompt) > 1) {
-                            throw IllegalStateException("SUDO_AUTH_REJECTED")
-                        }
-                        if (System.currentTimeMillis() >= authDeadline) {
-                            throw IllegalStateException("SUDO_AUTH_TIMEOUT")
-                        }
-                        Thread.sleep(80)
-                        ready = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)
-                    }
-                }
-                if (!ready) {
-                    throw IllegalStateException("SUDO_EXIT_BEFORE_READY")
-                }
-                // Root is confirmed. No sudo prompt can consume Python source now.
-                input.write(scriptBytes)
-                input.flush()
-                input.close()
-                input = null
-                val end = System.currentTimeMillis() + 200_000
-                while (!channel.isClosed) {
-                    if (System.currentTimeMillis() >= end) throw IllegalStateException("Execution time limit 200s")
-                    Thread.sleep(150)
-                }
-                return Result(channel.exitStatus,
-                    SudoHandshake.redact(stdout.asText(), marker, prompt),
-                    SudoHandshake.redact(stderr.asText(), marker, prompt))
+                sudoPassword.fill(0)
             }
 
-            val end = System.currentTimeMillis() + 200_000
+            val end = System.currentTimeMillis() + 220_000
             while (!channel.isClosed) {
-                if (System.currentTimeMillis() >= end) throw IllegalStateException("Execution time limit 200s")
+                if (System.currentTimeMillis() >= end) {
+                    throw IllegalStateException("SSH command exceeded 220 seconds")
+                }
                 Thread.sleep(150)
             }
             return Result(channel.exitStatus, stdout.asText(), stderr.asText())
@@ -123,7 +74,7 @@ object SshRunner {
             privateKey?.fill(0)
             sudoPassword?.fill(0)
             scriptBytes.fill(0)
-            try { input?.close() } catch (_: Exception) {}
+            elevatedPacket?.fill(0)
             try { channel?.disconnect() } catch (_: Exception) {}
             try { session?.disconnect() } catch (_: Exception) {}
         }
