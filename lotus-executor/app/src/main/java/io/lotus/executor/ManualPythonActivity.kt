@@ -240,7 +240,9 @@ class ManualPythonActivity : Activity() {
         } catch (e: Exception) {
             runOnUiThread {
                 val reason = when (e.message) {
-                    "SUDO_AUTH_TIMEOUT" -> "sudo: нет подтверждения за 25 секунд. Python-код не отправлен."
+                    "SUDO_PROMPT_TIMEOUT" -> "SSH подключён, но sudo не запросил пароль за 10 секунд. Код не отправлен."
+                    "SUDO_AUTH_TIMEOUT" -> "Пароль передан sudo, но root не подтвердился за 15 секунд. Код не отправлен."
+                    "SUDO_EXIT_BEFORE_READY" -> "sudo завершился без root-подтверждения. Код не отправлен."
                     "SUDO_AUTH_REJECTED" -> "sudo отклонил пароль. Python-код не отправлен."
                     else -> "SSH/sudo: ${e.javaClass.simpleName}. Выполнение не подтверждено."
                 }
