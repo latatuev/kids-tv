@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -41,6 +42,7 @@ class ManualPythonActivity : Activity() {
     private lateinit var output: TextView
     private lateinit var run: Button
     private lateinit var copyResult: Button
+    private lateinit var sudoMode: CheckBox
     private var executionStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,6 +99,13 @@ class ManualPythonActivity : Activity() {
         label("Lotus Executor · Python", 23f)
         label("Ручной ввод · $username@$host. Выполнение только после отдельного подтверждения.", 13f)
         run = button("Проверить и выполнить на Lotus") { confirmAndRun() }
+        sudoMode = CheckBox(this).apply {
+            text = "Выполнить с sudo (потребуется пароль на телефоне)"
+            textSize = 15f
+            setTextColor(Color.rgb(27, 39, 55))
+            isChecked = false
+        }
+        root.addView(sudoMode)
         state = label("Код не выполнялся. SSH-ключ остаётся на телефоне.", 14f)
         label("Python-код (передаётся как python3 -):")
         editor = EditText(this).apply {
@@ -156,6 +165,7 @@ class ManualPythonActivity : Activity() {
             state.text = "Нет настроенного SSH-ключа или known_hosts. Проверьте настройки."
             return
         }
+        val elevated = sudoMode.isChecked
         val script = editor.text.toString()
         val bytes = script.toByteArray(StandardCharsets.UTF_8)
         if (script.isBlank() || bytes.size > 20 * 1024 || script.indexOf('\u0000') >= 0) {
@@ -176,61 +186,41 @@ class ManualPythonActivity : Activity() {
         review.addView(readable)
         AlertDialog.Builder(this)
             .setTitle("Проверить Python-код и выполнить?")
-            .setMessage("Будет выполнен показанный ниже код от имени $username на Lotus. Он может изменить файлы. Проверка прав Lotus сохраняется.\nSHA-256: $digest")
+            .setMessage("Будет выполнен показанный ниже код " +
+                (if (elevated) "с правами root через sudo после отдельного ввода пароля" else "от имени $username") +
+                " на Lotus. Проверьте код.\nSHA-256: $digest")
             .setView(review)
             .setNegativeButton("Отмена", null)
             .setPositiveButton("Выполнить один раз") { _, _ ->
-                if (executionStarted) return@setPositiveButton
-                executionStarted = true
-                run.isEnabled = false
-                editor.isEnabled = false
-                copyResult.isEnabled = false
-                output.text = ""
-                state.text = "Подключаюсь к Lotus…"
-                Thread({ execute(script, digest) }, "executor-manual-python").start()
+                val start: (ByteArray?) -> Unit = { password ->
+                    if (executionStarted) {
+                        password?.fill(0)
+                    } else {
+                        executionStarted = true
+                        run.isEnabled = false
+                        sudoMode.isEnabled = false
+                        editor.isEnabled = false
+                        copyResult.isEnabled = false
+                        output.text = ""
+                        state.text = "Подключаюсь к Lotus…"
+                        Thread({ execute(script, digest, password) }, "executor-manual-python").start()
+                    }
+                }
+                if (elevated) SudoSupport.prompt(this) { password -> start(password) }
+                else start(null)
             }.show()
     }
 
-    private fun execute(script: String, sha: String) {
-        var session: Session? = null
-        var channel: ChannelExec? = null
-        var secret: ByteArray? = null
+    private fun execute(script: String, sha: String, sudoPassword: ByteArray?) {
         try {
-            val jsch = JSch()
-            jsch.setKnownHosts(ByteArrayInputStream(
-                (OwnerSshKeys.knownHosts(this) + "\n").toByteArray(StandardCharsets.UTF_8)
-            ))
-            secret = OwnerSshKeys.privateKey(this)
-            jsch.addIdentity("lotus-owner-device", secret, null, null)
-            session = jsch.getSession(username, host, 22)
-            session.setConfig("StrictHostKeyChecking", "yes")
-            session.setConfig("PreferredAuthentications", "publickey")
-            session.connect(15000)
-            secret.fill(0)
-            secret = null
-            channel = session.openChannel("exec") as ChannelExec
-            channel.setCommand("python3 -")
-            channel.setInputStream(ByteArrayInputStream(script.toByteArray(StandardCharsets.UTF_8)))
-            val stdout = CappedOutput()
-            val stderr = CappedOutput()
-            channel.setOutputStream(stdout)
-            channel.setErrStream(stderr)
-            channel.connect(15000)
-            val end = System.currentTimeMillis() + 200_000
-            while (!channel.isClosed) {
-                if (System.currentTimeMillis() >= end) {
-                    throw IllegalStateException("Превышен лимит 200 секунд")
-                }
-                Thread.sleep(150)
-            }
-            val exit = channel.exitStatus
-            val report = "SHA-256: $sha\nSSH exit code: $exit\n\n" +
-                stdout.asText() +
-                if (stderr.asText().isNotEmpty()) "\nSTDERR:\n" + stderr.asText() else ""
+            val result = SshRunner.run(applicationContext, script, sudoPassword)
+            val report = "SHA-256: $sha\nSSH exit code: ${result.exit}\n\n" +
+                result.stdout +
+                if (result.stderr.isNotEmpty()) "\nSTDERR:\n" + result.stderr else ""
             runOnUiThread {
                 output.text = report
                 copyResult.isEnabled = true
-                if (exit == 0) {
+                if (result.exit == 0) {
                     try {
                         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText(
@@ -238,12 +228,12 @@ class ManualPythonActivity : Activity() {
                         ))
                         state.text = "Выполнено успешно, результат скопирован в буфер"
                         state.setTextColor(Color.rgb(20, 125, 70))
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         state.text = "Команда выполнена, но результат не скопирован. Нажмите «Копировать результат»."
                         state.setTextColor(Color.rgb(151, 85, 12))
                     }
                 } else {
-                    state.text = "Команда завершилась с ошибкой: $exit"
+                    state.text = "Команда завершилась с ошибкой: ${result.exit}"
                     state.setTextColor(Color.rgb(170, 36, 36))
                 }
             }
@@ -251,27 +241,12 @@ class ManualPythonActivity : Activity() {
             runOnUiThread {
                 state.text = "Результат выполнения не подтверждён: ${e.javaClass.simpleName}"
                 state.setTextColor(Color.rgb(170, 36, 36))
-                output.text = (e.message ?: "Ошибка соединения").take(700)
+                output.text = "Соединение или sudo завершились с ошибкой; повтор без новой проверки запрещён."
                 copyResult.isEnabled = true
             }
         } finally {
-            secret?.fill(0)
-            try { channel?.disconnect() } catch (_: Exception) {}
-            try { session?.disconnect() } catch (_: Exception) {}
+            sudoPassword?.fill(0)
         }
     }
 
-    private class CappedOutput : OutputStream() {
-        private val data = ByteArrayOutputStream()
-        @Synchronized override fun write(b: Int) {
-            if (data.size() < 64 * 1024) data.write(b)
-        }
-        @Synchronized override fun write(b: ByteArray, off: Int, len: Int) {
-            if (data.size() < 64 * 1024) {
-                data.write(b, off, minOf(len, 64 * 1024 - data.size()))
-            }
-        }
-        @Synchronized fun asText(): String = data.toString("UTF-8") +
-            if (data.size() >= 64 * 1024) "\n[output truncated]" else ""
-    }
 }
