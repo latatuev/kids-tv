@@ -33,6 +33,9 @@ jobs:
       - name: Build debug APK
         working-directory: lotus-executor
         run: gradle --no-daemon :app:assembleDebug
+      - name: Test sudo handshake with real JVM tests
+        working-directory: lotus-executor
+        run: gradle --no-daemon :app:testDebugUnitTest
       - name: Reject unsigned release packaging
         working-directory: lotus-executor
         run: |
