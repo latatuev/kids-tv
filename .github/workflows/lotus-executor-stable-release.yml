@@ -29,8 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Pin immutable Executor v0.9 manual-code / top-button source, not a moving branch.
-          ref: 5db4658c232254831e00564ef9c570ab9ef6c3c9
+          # Pin green Executor v0.10 explicit sudo-consent source, not a moving branch.
+          ref: 08b371e59d7feeb1dd50eebe7fd7ee024bc94366
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
