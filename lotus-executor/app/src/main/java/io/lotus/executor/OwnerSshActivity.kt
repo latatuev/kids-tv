@@ -11,6 +11,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.Gravity
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -35,6 +36,7 @@ class OwnerSshActivity : Activity() {
     private lateinit var output: TextView
     private lateinit var run: Button
     private lateinit var copyResult: Button
+    private lateinit var sudoMode: CheckBox
     private val host = "135.106.163.200"
     private val username = "sergey"
     private val prefs by lazy { getSharedPreferences("lotus-owner-ssh-runs", Context.MODE_PRIVATE) }
@@ -120,22 +122,38 @@ class OwnerSshActivity : Activity() {
                 state.text = "Эта заявка уже запускалась. Для нового запуска нужна новая ссылка."
                 return@button
             }
+            val elevated = sudoMode.isChecked
             AlertDialog.Builder(this)
                 .setTitle("Выполнить Python на Lotus?")
-                .setMessage("Будет запущен показанный на экране скрипт от имени $username. Он может изменять файлы сайта. Проверьте весь текст перед подтверждением.\n\nSHA-256: ${task.sha256.take(16)}…")
+                .setMessage("Будет запущен показанный скрипт " +
+                    (if (elevated) "с правами root после отдельного ввода пароля sudo" else "от имени $username") +
+                    ". Проверьте весь текст перед подтверждением.\n\nSHA-256: ${task.sha256.take(16)}…")
                 .setNegativeButton("Отмена", null)
                 .setPositiveButton("Выполнить") { _, _ ->
-                    if (!prefs.edit().putBoolean(marker, true).commit()) {
-                        state.text = "Ошибка записи защиты от повторного запуска"
-                        return@setPositiveButton
+                    val start: (ByteArray?) -> Unit = { password ->
+                        if (!prefs.edit().putBoolean(marker, true).commit()) {
+                            password?.fill(0)
+                            state.text = "Ошибка записи защиты от повторного запуска"
+                        } else {
+                            run.isEnabled = false
+                            sudoMode.isEnabled = false
+                            state.text = "Подключение к Lotus…"
+                            output.text = ""
+                            copyResult.isEnabled = false
+                            Thread({ execute(password) }, "owner-ssh-exec").start()
+                        }
                     }
-                    run.isEnabled = false
-                    state.text = "Подключение к Lotus…"
-                    output.text = ""
-                    copyResult.isEnabled = false
-                    Thread({ execute() }, "owner-ssh-exec").start()
+                    if (elevated) SudoSupport.prompt(this) { password -> start(password) }
+                    else start(null)
                 }.show()
         }
+        sudoMode = CheckBox(this).apply {
+            text = "Выполнить с sudo (ввод пароля на телефоне)"
+            textSize = 15f
+            setTextColor(Color.rgb(27, 39, 55))
+            isChecked = false
+        }
+        root.addView(sudoMode)
         state = label("Из ссылки ничего автоматически не выполняется.")
         label("SHA-256: ${task.sha256}")
         label("Команда, которая будет исполнена: python3 -")
@@ -223,44 +241,15 @@ class OwnerSshActivity : Activity() {
 
     }
 
-    private fun execute() {
-        var session: Session? = null
-        var channel: ChannelExec? = null
-        var secret: ByteArray? = null
+    private fun execute(sudoPassword: ByteArray?) {
         try {
-            val jsch = JSch()
-            jsch.setKnownHosts(ByteArrayInputStream(
-                (OwnerSshKeys.knownHosts(this) + "\n").toByteArray(StandardCharsets.UTF_8)
-            ))
-            secret = OwnerSshKeys.privateKey(this)
-            jsch.addIdentity("lotus-owner-device", secret, null, null)
-            session = jsch.getSession(username, host, 22)
-            session.setConfig("StrictHostKeyChecking", "yes")
-            session.setConfig("PreferredAuthentications", "publickey")
-            session.connect(15000)
-            // Erase temporary PEM bytes only after authentication has completed.
-            secret.fill(0)
-            secret = null
-            channel = session.openChannel("exec") as ChannelExec
-            channel.setCommand("python3 -")
-            channel.setInputStream(ByteArrayInputStream(task.script.toByteArray(StandardCharsets.UTF_8)))
-            val out = CappedOutput()
-            val err = CappedOutput()
-            channel.setOutputStream(out)
-            channel.setErrStream(err)
-            channel.connect(15000)
-            val end = System.currentTimeMillis() + 200_000
-            while (!channel.isClosed) {
-                if (System.currentTimeMillis() >= end) throw RuntimeException("Команда превысила лимит 200 секунд")
-                Thread.sleep(150)
-            }
-            val status = channel.exitStatus
-            val report = "SSH exit code: $status\n\n" + out.asText() +
-                if (err.asText().isNotEmpty()) "\nSTDERR:\n" + err.asText() else ""
+            val result = SshRunner.run(applicationContext, task.script, sudoPassword)
+            val report = "SSH exit code: ${result.exit}\n\n" + result.stdout +
+                if (result.stderr.isNotEmpty()) "\nSTDERR:\n" + result.stderr else ""
             runOnUiThread {
                 output.text = report
                 copyResult.isEnabled = true
-                if (status == 0) {
+                if (result.exit == 0) {
                     try {
                         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                         clipboard.setPrimaryClip(ClipData.newPlainText(
@@ -268,12 +257,12 @@ class OwnerSshActivity : Activity() {
                         ))
                         state.text = "Выполнено успешно, результат скопирован в буфер"
                         state.setTextColor(Color.rgb(20, 125, 70))
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         state.text = "Команда выполнена, но результат не скопирован. Нажмите «Копировать результат»."
                         state.setTextColor(Color.rgb(151, 85, 12))
                     }
                 } else {
-                    state.text = "Команда завершилась с ошибкой: $status"
+                    state.text = "Команда завершилась с ошибкой: ${result.exit}"
                     state.setTextColor(Color.rgb(170, 36, 36))
                 }
             }
@@ -281,28 +270,14 @@ class OwnerSshActivity : Activity() {
             runOnUiThread {
                 state.text = "Выполнение не подтверждено: ${e.javaClass.simpleName}"
                 state.setTextColor(Color.rgb(170, 36, 36))
-                output.text = (e.message ?: "Ошибка соединения").take(700)
+                output.text = "SSH или sudo завершились с ошибкой; повтор этой ссылки запрещён."
                 copyResult.isEnabled = true
             }
         } finally {
-            secret?.fill(0)
-            try { channel?.disconnect() } catch (_: Exception) {}
-            try { session?.disconnect() } catch (_: Exception) {}
-            runOnUiThread { run.isEnabled = false }
+            sudoPassword?.fill(0)
         }
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
-    private class CappedOutput : OutputStream() {
-        private val data = ByteArrayOutputStream()
-        @Synchronized override fun write(b: Int) {
-            if (data.size() < 64 * 1024) data.write(b)
-        }
-        @Synchronized override fun write(b: ByteArray, off: Int, len: Int) {
-            if (data.size() < 64 * 1024) data.write(b, off, minOf(len, 64 * 1024 - data.size()))
-        }
-        @Synchronized fun asText(): String = data.toString("UTF-8") +
-            if (data.size() >= 64 * 1024) "\n[output truncated]" else ""
-    }
 }
