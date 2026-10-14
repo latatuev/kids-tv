@@ -38,8 +38,8 @@ android {
         applicationId = "io.lotus.executor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.10-sudo-consent"
+        versionCode = 11
+        versionName = "0.11-sudo-stream-fix"
     }
 
     signingConfigs {
@@ -73,4 +73,5 @@ android {
 dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("com.github.mwiede:jsch:2.28.8")
+    testImplementation("junit:junit:4.13.2")
 }
