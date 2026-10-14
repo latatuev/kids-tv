@@ -74,7 +74,18 @@ class MainActivity : Activity() {
         }
 
         textLine("Lotus Executor", 28f)
-        textLine("v0.7 · управление ключом телефона", 16f)
+        textLine("v0.9 · ручной Python-код и SSH", 16f)
+        val manualPython = Button(this).apply {
+            text = "Ввести Python-код для Lotus"
+            isAllCaps = false
+            isSingleLine = false
+            minHeight = dp(54)
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, ManualPythonActivity::class.java))
+            }
+        }
+        root.addView(styleAction(manualPython), LinearLayout.LayoutParams(-1, dp(58)))
+        textLine("Вставь код, проверь его и подтверди выполнение. Без автоматического запуска.", 13f)
         textLine("SSH-ключ телефона", 21f)
         sshStatus = textLine("Проверяю, создан ли ключ…", 16f)
         sshCreate = Button(this).apply {
