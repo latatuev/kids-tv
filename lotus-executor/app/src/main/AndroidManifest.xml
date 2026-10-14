@@ -10,6 +10,8 @@
         android:usesCleartextTraffic="false">
         <!-- User-confirmed owner SSH tasks; no external direct access. -->
         <activity android:name=".OwnerSshActivity" android:exported="false" />
+        <!-- Owner-only manual Python entry is never exported or reachable by external Intent. -->
+        <activity android:name=".ManualPythonActivity" android:exported="false" />
         <activity android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
