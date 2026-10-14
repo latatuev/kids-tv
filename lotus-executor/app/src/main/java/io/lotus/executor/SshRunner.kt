@@ -52,38 +52,53 @@ object SshRunner {
                 channel.setInputStream(ByteArrayInputStream(scriptBytes))
                 channel.connect(15000)
             } else {
-                val marker = "LOTUS_SUDO_READY_" + UUID.randomUUID().toString().replace("-", "")
-                // Root shell emits marker only if sudo authentication succeeded.
-                // No script lines are presented to sudo on a failed password.
+                val nonce = UUID.randomUUID().toString().replace("-", "")
+                val prompt = "LOTUS_SUDO_PROMPT_" + nonce
+                val marker = "LOTUS_SUDO_READY_" + nonce
+                // The prompt is a distinct handshake message from sudo itself.
+                // Only after receiving it do we send a password. The root marker
+                // is emitted by the authenticated shell, BEFORE receiving Python.
+                // No SSH PTY is requested: terminal echo must not expose passwords.
                 channel.setCommand(
-                    "sudo -k -S -p '' -- /bin/sh -c 'printf $marker; exec python3 -'"
+                    "sudo -k -S -p '$prompt' -- /bin/sh -c 'printf $marker; exec python3 -'"
                 )
                 input = channel.outputStream
                 channel.connect(15000)
-                input.write(sudoPassword)
-                input.flush()
-                sudoPassword.fill(0)
-                // sudoers use_pty can merge child's stderr into SSH stdout.
-                // Detect both streams; never send the Python body until the
-                // authenticated root shell itself emits the random marker.
-                val authDeadline = System.currentTimeMillis() + 25000
-                var confirmed = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)
-                while (!channel.isClosed && !confirmed) {
-                    val outNow = stdout.asText()
-                    val errNow = stderr.asText()
-                    if (SudoHandshake.passwordRejected(outNow, errNow)) {
-                        throw IllegalStateException("SUDO_AUTH_REJECTED")
-                    }
-                    if (System.currentTimeMillis() >= authDeadline) {
-                        throw IllegalStateException("SUDO_AUTH_TIMEOUT")
+                val promptDeadline = System.currentTimeMillis() + 10000
+                while (!channel.isClosed && !SudoHandshake.confirmed(
+                        stdout.asText(), stderr.asText(), prompt
+                    ) && !SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)) {
+                    if (System.currentTimeMillis() >= promptDeadline) {
+                        throw IllegalStateException("SUDO_PROMPT_TIMEOUT")
                     }
                     Thread.sleep(80)
-                    confirmed = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)
                 }
-                if (!confirmed && !SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)) {
-                    return Result(channel.exitStatus, stdout.asText(),
-                        stderr.asText() + "\\nsudo did not authenticate; Python not sent")
+                val prompted = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), prompt)
+                var ready = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)
+                if (prompted && !ready) {
+                    input.write(sudoPassword)
+                    input.flush()
+                    sudoPassword.fill(0)
+                    val authDeadline = System.currentTimeMillis() + 15000
+                    while (!channel.isClosed && !ready) {
+                        val outNow = stdout.asText()
+                        val errNow = stderr.asText()
+                        // A second custom password prompt is definitive refusal.
+                        if (SudoHandshake.passwordRejected(outNow, errNow) ||
+                            SudoHandshake.occurrences(outNow, errNow, prompt) > 1) {
+                            throw IllegalStateException("SUDO_AUTH_REJECTED")
+                        }
+                        if (System.currentTimeMillis() >= authDeadline) {
+                            throw IllegalStateException("SUDO_AUTH_TIMEOUT")
+                        }
+                        Thread.sleep(80)
+                        ready = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)
+                    }
                 }
+                if (!ready) {
+                    throw IllegalStateException("SUDO_EXIT_BEFORE_READY")
+                }
+                // Root is confirmed. No sudo prompt can consume Python source now.
                 input.write(scriptBytes)
                 input.flush()
                 input.close()
@@ -93,8 +108,9 @@ object SshRunner {
                     if (System.currentTimeMillis() >= end) throw IllegalStateException("Execution time limit 200s")
                     Thread.sleep(150)
                 }
-                return Result(channel.exitStatus, SudoHandshake.redact(stdout.asText(), marker),
-                    SudoHandshake.redact(stderr.asText(), marker))
+                return Result(channel.exitStatus,
+                    SudoHandshake.redact(stdout.asText(), marker, prompt),
+                    SudoHandshake.redact(stderr.asText(), marker, prompt))
             }
 
             val end = System.currentTimeMillis() + 200_000
