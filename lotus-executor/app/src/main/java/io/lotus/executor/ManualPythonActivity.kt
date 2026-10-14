@@ -239,9 +239,14 @@ class ManualPythonActivity : Activity() {
             }
         } catch (e: Exception) {
             runOnUiThread {
-                state.text = "Результат выполнения не подтверждён: ${e.javaClass.simpleName}"
+                val reason = when (e.message) {
+                    "SUDO_AUTH_TIMEOUT" -> "sudo: нет подтверждения за 25 секунд. Python-код не отправлен."
+                    "SUDO_AUTH_REJECTED" -> "sudo отклонил пароль. Python-код не отправлен."
+                    else -> "SSH/sudo: ${e.javaClass.simpleName}. Выполнение не подтверждено."
+                }
+                state.text = reason
                 state.setTextColor(Color.rgb(170, 36, 36))
-                output.text = "Соединение или sudo завершились с ошибкой; повтор без новой проверки запрещён."
+                output.text = "Команда не подтверждена. Не повторяйте автоматически; новый запуск требует проверки кода."
                 copyResult.isEnabled = true
             }
         } finally {
