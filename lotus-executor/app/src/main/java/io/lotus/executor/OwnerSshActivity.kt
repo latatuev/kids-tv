@@ -110,6 +110,33 @@ class OwnerSshActivity : Activity() {
         }
         label("Lotus Executor · SSH владельца", 23f)
         label("Сервер: $username@$host   •   Задача: ${task.id}")
+        run = button("Подтвердить и выполнить на Lotus") {
+            if (!OwnerSshKeys.hasIdentity(this) || OwnerSshKeys.knownHosts(this).isEmpty()) {
+                state.text = "Сначала настройте SSH-ключ телефона и проверенный ключ сервера."
+                return@button
+            }
+            val marker = "${task.id}:${task.sha256}"
+            if (prefs.getBoolean(marker, false)) {
+                state.text = "Эта заявка уже запускалась. Для нового запуска нужна новая ссылка."
+                return@button
+            }
+            AlertDialog.Builder(this)
+                .setTitle("Выполнить Python на Lotus?")
+                .setMessage("Будет запущен показанный на экране скрипт от имени $username. Он может изменять файлы сайта. Проверьте весь текст перед подтверждением.\n\nSHA-256: ${task.sha256.take(16)}…")
+                .setNegativeButton("Отмена", null)
+                .setPositiveButton("Выполнить") { _, _ ->
+                    if (!prefs.edit().putBoolean(marker, true).commit()) {
+                        state.text = "Ошибка записи защиты от повторного запуска"
+                        return@setPositiveButton
+                    }
+                    run.isEnabled = false
+                    state.text = "Подключение к Lotus…"
+                    output.text = ""
+                    copyResult.isEnabled = false
+                    Thread({ execute() }, "owner-ssh-exec").start()
+                }.show()
+        }
+        state = label("Из ссылки ничего автоматически не выполняется.")
         label("SHA-256: ${task.sha256}")
         label("Команда, которая будет исполнена: python3 -")
         val code = label(task.script, 12f).apply {
@@ -181,7 +208,6 @@ class OwnerSshActivity : Activity() {
             try { OwnerSshKeys.saveKnownHosts(this, known.text.toString()); state.text = "Ключ сервера сохранён" }
             catch (e: Exception) { state.text = "Ошибка: ${e.message}" }
         }
-        state = label("Из ссылки ничего автоматически не выполняется.")
         output = label("", 12f).apply { setTextIsSelectable(true); typeface = Typeface.MONOSPACE }
         // Copy exactly the displayed task result, including SSH status and stderr,
         // without copying the executable Python script or any private SSH material.
@@ -194,32 +220,7 @@ class OwnerSshActivity : Activity() {
             }
         }
         copyResult.isEnabled = false
-        run = button("Подтвердить и выполнить на Lotus") {
-            if (!OwnerSshKeys.hasIdentity(this) || OwnerSshKeys.knownHosts(this).isEmpty()) {
-                state.text = "Сначала настройте SSH-ключ телефона и проверенный ключ сервера."
-                return@button
-            }
-            val marker = "${task.id}:${task.sha256}"
-            if (prefs.getBoolean(marker, false)) {
-                state.text = "Эта заявка уже запускалась. Для нового запуска нужна новая ссылка."
-                return@button
-            }
-            AlertDialog.Builder(this)
-                .setTitle("Выполнить Python на Lotus?")
-                .setMessage("Будет запущен показанный выше скрипт от имени $username. Он может изменять файлы сайта. Проверьте весь текст перед подтверждением.\n\nSHA-256: ${task.sha256.take(16)}…")
-                .setNegativeButton("Отмена", null)
-                .setPositiveButton("Выполнить") { _, _ ->
-                    if (!prefs.edit().putBoolean(marker, true).commit()) {
-                        state.text = "Ошибка записи защиты от повторного запуска"
-                        return@setPositiveButton
-                    }
-                    run.isEnabled = false
-                    state.text = "Подключение к Lotus…"
-                    output.text = ""
-                    copyResult.isEnabled = false
-                    Thread({ execute() }, "owner-ssh-exec").start()
-                }.show()
-        }
+
     }
 
     private fun execute() {
@@ -257,13 +258,29 @@ class OwnerSshActivity : Activity() {
             val report = "SSH exit code: $status\n\n" + out.asText() +
                 if (err.asText().isNotEmpty()) "\nSTDERR:\n" + err.asText() else ""
             runOnUiThread {
-                state.text = if (status == 0) "Команда завершилась успешно" else "Команда завершилась с ошибкой: $status"
                 output.text = report
                 copyResult.isEnabled = true
+                if (status == 0) {
+                    try {
+                        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText(
+                            "Lotus Executor result", "Задача: ${task.id}\nКоманда завершилась успешно\n\n$report"
+                        ))
+                        state.text = "Выполнено успешно, результат скопирован в буфер"
+                        state.setTextColor(Color.rgb(20, 125, 70))
+                    } catch (e: Exception) {
+                        state.text = "Команда выполнена, но результат не скопирован. Нажмите «Копировать результат»."
+                        state.setTextColor(Color.rgb(151, 85, 12))
+                    }
+                } else {
+                    state.text = "Команда завершилась с ошибкой: $status"
+                    state.setTextColor(Color.rgb(170, 36, 36))
+                }
             }
         } catch (e: Exception) {
             runOnUiThread {
                 state.text = "Выполнение не подтверждено: ${e.javaClass.simpleName}"
+                state.setTextColor(Color.rgb(170, 36, 36))
                 output.text = (e.message ?: "Ошибка соединения").take(700)
                 copyResult.isEnabled = true
             }
