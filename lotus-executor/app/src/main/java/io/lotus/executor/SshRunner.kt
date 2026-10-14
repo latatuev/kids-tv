@@ -56,22 +56,33 @@ object SshRunner {
                 // Root shell emits marker only if sudo authentication succeeded.
                 // No script lines are presented to sudo on a failed password.
                 channel.setCommand(
-                    "sudo -k -S -p '' -- /bin/sh -c 'printf $marker >&2; exec python3 -'"
+                    "sudo -k -S -p '' -- /bin/sh -c 'printf $marker; exec python3 -'"
                 )
                 input = channel.outputStream
                 channel.connect(15000)
                 input.write(sudoPassword)
                 input.flush()
                 sudoPassword.fill(0)
-                val authDeadline = System.currentTimeMillis() + 30000
-                while (!channel.isClosed && !stderr.contains(marker)) {
+                // sudoers use_pty can merge child's stderr into SSH stdout.
+                // Detect both streams; never send the Python body until the
+                // authenticated root shell itself emits the random marker.
+                val authDeadline = System.currentTimeMillis() + 25000
+                var confirmed = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)
+                while (!channel.isClosed && !confirmed) {
+                    val outNow = stdout.asText()
+                    val errNow = stderr.asText()
+                    if (SudoHandshake.passwordRejected(outNow, errNow)) {
+                        throw IllegalStateException("SUDO_AUTH_REJECTED")
+                    }
                     if (System.currentTimeMillis() >= authDeadline) {
-                        throw IllegalStateException("sudo authentication timed out; Python not sent")
+                        throw IllegalStateException("SUDO_AUTH_TIMEOUT")
                     }
                     Thread.sleep(80)
+                    confirmed = SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)
                 }
-                if (!stderr.contains(marker)) {
-                    return Result(channel.exitStatus, stdout.asText(), stderr.asText())
+                if (!confirmed && !SudoHandshake.confirmed(stdout.asText(), stderr.asText(), marker)) {
+                    return Result(channel.exitStatus, stdout.asText(),
+                        stderr.asText() + "\\nsudo did not authenticate; Python not sent")
                 }
                 input.write(scriptBytes)
                 input.flush()
@@ -82,7 +93,8 @@ object SshRunner {
                     if (System.currentTimeMillis() >= end) throw IllegalStateException("Execution time limit 200s")
                     Thread.sleep(150)
                 }
-                return Result(channel.exitStatus, stdout.asText(), stderr.asText().replace(marker, ""))
+                return Result(channel.exitStatus, SudoHandshake.redact(stdout.asText(), marker),
+                    SudoHandshake.redact(stderr.asText(), marker))
             }
 
             val end = System.currentTimeMillis() + 200_000
