@@ -38,8 +38,8 @@ android {
         applicationId = "io.lotus.executor"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "0.9-manual-python"
+        versionCode = 10
+        versionName = "0.10-sudo-consent"
     }
 
     signingConfigs {
