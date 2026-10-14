@@ -29,8 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Pin verified Executor v0.11 sudo-stream fix with JVM tests, not a moving branch.
-          ref: b8062b002564449fda7cef1722c229e37cdd8fb1
+          # Pin green Executor v0.12 prompt-first sudo handshake with JVM tests, not moving branch.
+          ref: 8673856dfc0c685329f9b837ce72c8f4ccd900d8
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
