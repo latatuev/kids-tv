@@ -29,8 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Pin release sources to audited owner-SSH build, not a moving branch.
-          ref: 0d4f264b9475ac5c537662089061ec23b4741388
+          # Pin immutable Executor v0.9 manual-code / top-button source, not a moving branch.
+          ref: 5db4658c232254831e00564ef9c570ab9ef6c3c9
           persist-credentials: false
       - uses: actions/setup-java@v4
         with:
