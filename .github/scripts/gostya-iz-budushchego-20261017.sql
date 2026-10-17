@@ -57,7 +57,7 @@ epis(n,rutube_id,runtime) AS (
 ),
 candidate AS (
   SELECT parent.id AS parent_id, e.n, e.rutube_id, e.runtime,
-         'Гостья из будущего — '+e.n::text+'-я серия' AS title
+         'Гостья из будущего — ' || e.n::text || '-я серия' AS title
   FROM parent CROSS JOIN epis e
 )
 INSERT INTO public.kidstv_media (
