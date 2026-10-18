@@ -1,0 +1,101 @@
+name: Kids TV exact poster preview
+on:
+  push:
+    paths:
+      - .github/workflows/kids-tv-exact-poster-preview-20261018.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Download real current posters and compose proportion-correct preview
+        shell: bash
+        run: |
+          python -m pip install --quiet pillow requests
+          mkdir -p preview
+          cat > /tmp/render_kidstv.py <<'PY'
+          import json,io,os,requests
+          from PIL import Image,ImageDraw,ImageFont
+          ids=[
+          "29a5d1c3-90e8-4715-9848-51cc5c08d4a5",
+          "4ad18540-7eda-4081-9ab4-05a33b2afd4e",
+          "f498ed54-6f0a-4aa1-9ff5-3b201f63ff2e",
+          "d7eb03a8-1006-4dc3-9be5-c7baaf1bef2f",
+          "e8814ea3-99de-48a8-802b-dcd5aebe0695"]
+          origins=[
+          "https://cdn.maximonline.ru/1d/e6/b5/1de6b5ebce5f0e7bc49c603fc5077493/1196x830_0xac120003_16649445131554304686.jpg",
+          "https://m.media-amazon.com/images/M/MV5BMTE0NTAwYzgtZWMwMS00MDc3LTliMzQtNWEwYTI5N2I3OTRkXkEyXkFqcGc%40._V1_.jpg",
+          "https://n-e-n.ru/images/2025-09-04/68b98472ce76b_0x0.jpg",
+          "https://image.tmdb.org/t/p/original/z9MYzXMqPPa9pLlxH41jc1QwWbS.jpg",
+          "https://static.kinoafisha.info/k/articles/1200/upload/articles/885646352492.jpg"]
+          s=requests.Session();s.headers.update({"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36","Accept":"image/avif,image/webp,image/apng,image/*,*/*;q=0.8"})
+          images=[];report=[]
+          for i,(id,origin) in enumerate(zip(ids,origins),1):
+              proxy=f"https://cmgdmsqcxrbwxghydmtb.supabase.co/functions/v1/kids-tv-poster?id={id}"
+              statuses=[];pic=None
+              for name,url in [('current_kids_tv',proxy),('origin',origin)]:
+                  try:
+                      r=s.get(url,timeout=22)
+                      if r.status_code!=200: raise RuntimeError(f"HTTP {r.status_code}")
+                      if 'svg' in r.headers.get('content-type','').lower(): raise RuntimeError('SVG fallback, not real film image')
+                      img=Image.open(io.BytesIO(r.content));img.load()
+                      if min(img.size)<140: raise RuntimeError(f"too small {img.size}")
+                      pic=img.convert('RGB');statuses.append({'source':name,'ok':True,'size':img.size,'url':r.url,'bytes':len(r.content)})
+                      pic.save(f'preview/episode_{i}.jpg',quality=91)
+                      break
+                  except Exception as e: statuses.append({'source':name,'ok':False,'why':str(e)[:150]})
+              images.append(pic);report.append({'episode':i,'sources':statuses})
+          W,H=1600,1000
+          canvas=Image.new('RGB',(W,H),(12,20,33))
+          d=ImageDraw.Draw(canvas)
+          fontpath='/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+          bold='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
+          f=lambda size,b=False:ImageFont.truetype(bold if b else fontpath,size)
+          d.text((45,25),'KIDS TV',font=f(19,True),fill=(157,181,219))
+          d.text((45,63),'Гостья из будущего',font=f(38,True),fill=(239,246,255))
+          d.text((650,40),'APK v0.25     5 выпусков    ↻ Обновить     Перезапустить     Сеть     Выход',font=f(21,True),fill=(215,226,244))
+          for j,(label,w) in enumerate([('← Назад',186),('Кто смотрит?',244),('✕ Закрыть',191)]):
+              x=[45,246,510][j]
+              d.rounded_rectangle((x,172,x+w,234),radius=29,fill=(218,236,251) if j==0 else (39,85,146))
+              d.text((x+22,188),label,font=f(22,True),fill=(15,35,56) if j==0 else (238,246,255))
+          d.text((44,312),'Гостья из будущего — выпуски',font=f(34,True),fill=(238,246,255))
+          d.text((641,324),'5',font=f(20),fill=(169,188,218))
+          colors=[(22,122,241),(0,166,174),(252,116,47),(157,76,221),(238,36,146)]
+          durations=['01:03:19','01:03:52','01:03:11','01:03:28','01:03:11']
+          x0=45;cw=280;gap=25;py=382;ph=420
+          for i,img in enumerate(images):
+              x=x0+i*(cw+gap)
+              card=Image.new('RGB',(cw,ph),(25,37,56))
+              if img:
+                  thumb=img.copy();thumb.thumbnail((cw,ph),Image.Resampling.LANCZOS)
+                  card.paste(thumb,((cw-thumb.width)//2,(ph-thumb.height)//2))
+              canvas.paste(card,(x,py))
+              for yy in range(130):
+                  alpha=(yy/130)**2*0.34
+                  overlay=Image.new('RGB',(cw,1),colors[i])
+                  Image.blend(canvas.crop((x,py+ph-130+yy,x+cw,py+ph-129+yy)),overlay,alpha)
+                  # Use rectangle alpha composite separately
+              # standard poster rounded cutout and label
+              d.rounded_rectangle((x+9,py+12,x+145,py+58),radius=12,fill=colors[i])
+              d.text((x+22,py+21),f'Серия {i+1}',font=f(18,True),fill='white')
+              d.rounded_rectangle((x+cw-124,py+ph-48,x+cw-9,py+ph-10),radius=10,fill=(8,16,28))
+              d.text((x+cw-119,py+ph-38),durations[i],font=f(17,True),fill='white')
+              d.text((x,py+ph+15),f'{i+1}-я серия',font=f(24,True),fill=(240,246,255))
+              d.text((x,py+ph+54),durations[i]+' · 1984',font=f(17),fill=(170,191,219))
+              if img is None:
+                  d.text((x+18,py+190),'ИЗОБРАЖЕНИЕ',font=f(18,True),fill=(255,190,190))
+                  d.text((x+18,py+220),'НЕ ЗАГРУЗИЛОСЬ',font=f(17,True),fill=(255,190,190))
+          canvas.save('preview/kidstv_exact_assets_layout.png')
+          with open('preview/verification.json','w',encoding='utf8') as fh:json.dump({'poster_style':'actual Kids TV CSS aspect ratio 2:3 and contain; screenshot mock reproduces measurements but is not actual Android app capture','images':report},fh,ensure_ascii=False,indent=2)
+          print('IMAGE_SUCCESS_COUNT',sum(i is not None for i in images))
+          print(json.dumps(report,ensure_ascii=False)[:5500])
+          PY
+          python /tmp/render_kidstv.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kids-tv-exact-poster-preview
+          path: preview/
+          retention-days: 2
