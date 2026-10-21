@@ -85,7 +85,21 @@ jobs:
               if(tvPolls)throw Error('iPad unexpectedly polling TV state: '+tvPolls);
               if(backgroundKp)throw Error('iPad unexpectedly syncing KinoPub metadata: '+backgroundKp);
               if(errors.length)throw Error('Browser exceptions: '+JSON.stringify(errors.slice(0,6)));
-              const result={pass:true,browser:flavor,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,backgroundKp};
+              // Isolated playback-route fixture: no real KinoPub credentials, streams or data changes.
+              await page.evaluate(()=>localStorage.setItem('kidstv_kp_token','ci-isolated-playback-fixture'));
+              await page.route(/kids-tv-kp-proxy\\//,route=>route.fulfill({
+                status:200,contentType:'application/json',
+                body:JSON.stringify({item:{videos:[{files:[{quality:'720',url:{hls:'https://kidstv-playback.invalid/fixture.m3u8'}}]}]}})
+              }));
+              await page.getByRole('button',{name:'WALL-E',exact:true}).click();
+              await page.locator('#webPlayer.open').waitFor({timeout:15000});
+              const fixtureSrc=await page.locator('#webVideo').evaluate(v=>v.currentSrc||v.src);
+              if(!fixtureSrc.includes('kidstv-playback.invalid/fixture.m3u8'))throw Error('iPad failed to select HLS media source: '+fixtureSrc);
+              await page.locator('#webPlayerClose').click();
+              if(await page.locator('#webPlayer.open').count())throw Error('iPad player did not close');
+              if(!(await page.locator('.card').count()))throw Error('iPad catalog missing after player close');
+              const mockedPlaybackUiPass=true;
+              const result={pass:true,browser:flavor,mockedPlaybackUiPass,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,backgroundKp};
               fs.writeFileSync('qa-'+flavor+'.json',JSON.stringify(result,null,2));
               console.log('KIDSTV_IPAD_QA',JSON.stringify(result));
             }finally{
