@@ -9,7 +9,11 @@ permissions:
 jobs:
   ipad-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
     steps:
       - name: Install browser for end-user UI verification
         run: |
@@ -17,16 +21,18 @@ jobs:
           cd /tmp/kidstv-ipad-smoke
           npm init -y >/dev/null
           npm install --silent --no-save playwright
-          npx playwright install chromium --with-deps >/dev/null
+          npx playwright install ${{ matrix.browser }} --with-deps >/dev/null
       - name: Open actual published Kids TV in tablet browser
         shell: bash
         run: |
           cd /tmp/kidstv-ipad-smoke
           cat > test-ipad.cjs <<'JS'
-          const {chromium}=require('playwright');
+          const {chromium,webkit}=require('playwright');
           const fs=require('fs');
           (async()=>{
-            const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+            const flavor=process.env.KIDSTV_BROWSER||'chromium';
+            const engine=flavor==='webkit'?webkit:chromium;
+            const browser=await engine.launch({headless:true,args:flavor==='chromium'?['--no-sandbox']:[]});
             const context=await browser.newContext({
               viewport:{width:1024,height:768},
               deviceScaleFactor:2,
@@ -49,7 +55,7 @@ jobs:
               await page.locator('[data-adult-audience-picker="1"]').waitFor({timeout:90000});
               const version=(await page.locator('#appVersion').innerText()).trim();
               if(!version.includes('iPad · Kids TV'))throw Error('Wrong mode: '+version);
-              await page.screenshot({path:'ipad_choose_children.png',fullPage:true});
+              await page.screenshot({path:'ipad_'+flavor+'_choose_children.png',fullPage:true});
               await page.locator('[data-audience-role="child"][data-slug="leva"]').click();
               await page.locator('[data-audience-role="show"]').click();
               await page.locator('.card').first().waitFor({timeout:25000});
@@ -62,7 +68,7 @@ jobs:
               if(cards.some(t=>String(t).includes('Гостья из будущего')))throw Error('Hidden Guest test content exposed');
               await page.waitForTimeout(6500);
               const posterStats=await page.locator('.card img').evaluateAll(imgs=>({loaded:imgs.filter(i=>i.complete&&i.naturalWidth>0).length,total:imgs.length}));
-              await page.screenshot({path:'ipad_leva_catalog.png',fullPage:true});
+              await page.screenshot({path:'ipad_'+flavor+'_leva_catalog.png',fullPage:true});
               await page.getByRole('button',{name:'← Кто смотрит?'}).click();
               await page.locator('[data-audience-role="child"][data-slug="sonya"]').click();
               await page.locator('[data-audience-role="child"][data-slug="ilyusha"]').click();
@@ -71,7 +77,7 @@ jobs:
               if(!status.includes('Лёва')||!status.includes('Соня')||!status.includes('Илюша'))throw Error('Joint selection not displayed: '+status);
               await page.reload({waitUntil:'domcontentloaded'});
               await page.waitForFunction(()=>document.querySelector('#pageTitle')?.textContent?.includes('Лёва')&&document.querySelector('#pageTitle')?.textContent?.includes('Илюша'),null,{timeout:45000});
-              await page.screenshot({path:'ipad_three_children.png',fullPage:true});
+              await page.screenshot({path:'ipad_'+flavor+'_three_children.png',fullPage:true});
               const manifest=await context.request.get('https://latatuev.github.io/kids-tv/manifest.webmanifest');
               if(!manifest.ok())throw Error('Manifest HTTP '+manifest.status());
               const mj=await manifest.json();
@@ -79,21 +85,21 @@ jobs:
               if(tvPolls)throw Error('iPad unexpectedly polling TV state: '+tvPolls);
               if(backgroundKp)throw Error('iPad unexpectedly syncing KinoPub metadata: '+backgroundKp);
               if(errors.length)throw Error('Browser exceptions: '+JSON.stringify(errors.slice(0,6)));
-              const result={pass:true,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,backgroundKp};
-              fs.writeFileSync('qa.json',JSON.stringify(result,null,2));
+              const result={pass:true,browser:flavor,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,backgroundKp};
+              fs.writeFileSync('qa-'+flavor+'.json',JSON.stringify(result,null,2));
               console.log('KIDSTV_IPAD_QA',JSON.stringify(result));
             }finally{
               await browser.close();
             }
           })().catch(e=>{console.error('KIDSTV_IPAD_SMOKE_FAILED',e.message);process.exitCode=1});
           JS
-          node test-ipad.cjs
+          KIDSTV_BROWSER=${{ matrix.browser }} node test-ipad.cjs
       - name: Upload screenshots and QA report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kids-tv-ipad-browser-smoke
+          name: kids-tv-ipad-browser-smoke-${{ matrix.browser }}
           path: |
             /tmp/kidstv-ipad-smoke/*.png
-            /tmp/kidstv-ipad-smoke/qa.json
+            /tmp/kidstv-ipad-smoke/qa-*.json
           retention-days: 3
