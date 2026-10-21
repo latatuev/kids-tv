@@ -99,8 +99,39 @@ jobs:
               const mj=await manifest.json();
               if(!String(mj.start_url).includes('ipad-kids'))throw Error('Manifest start_url missing iPad mode');
               if(tvPolls)throw Error('iPad unexpectedly polling TV state: '+tvPolls);
+              // Isolated iPad YouTube fixture: mutate only this browser response, never production media.
+              await page.route('**/functions/v1/kids-tv-data*',async route=>{
+                const response=await route.fetch();
+                const catalog=await response.json();
+                const item=(catalog.media||[]).find(m=>m.title==='WALL-E');
+                if(!item)throw Error('Fixture WALL-E missing');
+                item.source={youtube:{video_id:'M7lc1UVf-VE'}};
+                await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(catalog)});
+              });
+              await page.route('https://www.youtube.com/embed/**',route=>route.fulfill({
+                status:200,contentType:'text/html',
+                body:'<!doctype html><html><body style="display:grid;place-items:center;height:100vh;background:black"><button id="ytTestPlay" style="font-size:50px" onclick="this.textContent=\'Playing\'">▶</button></body></html>'
+              }));
+              await page.evaluate(()=>localStorage.setItem('kidstv_ipad_selected_children_v1',JSON.stringify(['leva'])));
+              await page.reload({waitUntil:'domcontentloaded'});
+              await page.getByRole('button',{name:'WALL-E',exact:true}).waitFor({timeout:30000});
+              await page.getByRole('button',{name:'WALL-E',exact:true}).click();
+              const ytOverlay=page.locator('#ytPlayerOverlay[data-youtube-mode="touch-embed"]');
+              await ytOverlay.waitFor({timeout:10000});
+              const youtubeSrc=await page.locator('#ytPlayerFrame').getAttribute('src');
+              if(!youtubeSrc.includes('autoplay=0')||!youtubeSrc.includes('controls=1')||youtubeSrc.includes('enablejsapi=1'))
+                throw Error('iPad YouTube uses the wrong autoplay/controls mode: '+youtubeSrc);
+              await page.locator('#ytLoading').waitFor({state:'detached',timeout:10000});
+              if(await page.locator('#ytControlBar:visible').count())throw Error('Android TV control bar is visible on iPad');
+              await page.frameLocator('#ytPlayerFrame').locator('#ytTestPlay').click({timeout:10000});
+              if(await page.frameLocator('#ytPlayerFrame').locator('#ytTestPlay').innerText()!=='Playing')
+                throw Error('YouTube embedded touch interaction blocked');
+              await page.locator('#ytPlayerOverlay button[aria-label="Закрыть"]').click();
+              await page.locator('#ytPlayerOverlay').waitFor({state:'detached',timeout:10000});
+              if(!await page.getByRole('button',{name:'WALL-E',exact:true}).count())throw Error('Catalog not restored after YouTube close');
+              const ipadYoutubeTouchUiPass=true;
               if(errors.length)throw Error('Browser exceptions: '+JSON.stringify(errors.slice(0,6)));
-              const result={pass:true,browser:flavor,mockedPlaybackUiPass,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,mockedKpRequests:backgroundKp};
+              const result={pass:true,browser:flavor,mockedPlaybackUiPass,ipadYoutubeTouchUiPass,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,mockedKpRequests:backgroundKp};
               fs.writeFileSync('qa-'+flavor+'.json',JSON.stringify(result,null,2));
               console.log('KIDSTV_IPAD_QA',JSON.stringify(result));
             }finally{
