@@ -69,6 +69,20 @@ jobs:
               await page.waitForTimeout(6500);
               const posterStats=await page.locator('.card img').evaluateAll(imgs=>({loaded:imgs.filter(i=>i.complete&&i.naturalWidth>0).length,total:imgs.length}));
               await page.screenshot({path:'ipad_'+flavor+'_leva_catalog.png',fullPage:true});
+              // Isolated playback-route fixture: no real KinoPub credentials, streams or data changes.
+              await page.evaluate(()=>localStorage.setItem('kidstv_kp_token','ci-isolated-playback-fixture'));
+              await page.route('**/kids-tv-kp-proxy/**',route=>route.fulfill({
+                status:200,contentType:'application/json',
+                body:JSON.stringify({item:{videos:[{files:[{quality:'720',url:{hls:'https://kidstv-playback.invalid/fixture.m3u8'}}]}]}})
+              }));
+              await page.getByRole('button',{name:'WALL-E',exact:true}).click();
+              await page.locator('#webPlayer.open').waitFor({timeout:15000});
+              const fixtureSrc=await page.locator('#webVideo').evaluate(v=>v.currentSrc||v.src);
+              if(!fixtureSrc.includes('kidstv-playback.invalid/fixture.m3u8'))throw Error('iPad failed to select HLS media source: '+fixtureSrc);
+              await page.locator('#webPlayerClose').click();
+              if(await page.locator('#webPlayer.open').count())throw Error('iPad player did not close');
+              if(!(await page.locator('.card').count()))throw Error('iPad catalog missing after player close');
+              const mockedPlaybackUiPass=true;
               await page.getByRole('button',{name:'← Кто смотрит?'}).click();
               await page.locator('[data-audience-role="child"][data-slug="sonya"]').click();
               await page.locator('[data-audience-role="child"][data-slug="ilyusha"]').click();
@@ -85,20 +99,6 @@ jobs:
               if(tvPolls)throw Error('iPad unexpectedly polling TV state: '+tvPolls);
               if(backgroundKp)throw Error('iPad unexpectedly syncing KinoPub metadata: '+backgroundKp);
               if(errors.length)throw Error('Browser exceptions: '+JSON.stringify(errors.slice(0,6)));
-              // Isolated playback-route fixture: no real KinoPub credentials, streams or data changes.
-              await page.evaluate(()=>localStorage.setItem('kidstv_kp_token','ci-isolated-playback-fixture'));
-              await page.route('**/kids-tv-kp-proxy/**',route=>route.fulfill({
-                status:200,contentType:'application/json',
-                body:JSON.stringify({item:{videos:[{files:[{quality:'720',url:{hls:'https://kidstv-playback.invalid/fixture.m3u8'}}]}]}})
-              }));
-              await page.getByRole('button',{name:'WALL-E',exact:true}).click();
-              await page.locator('#webPlayer.open').waitFor({timeout:15000});
-              const fixtureSrc=await page.locator('#webVideo').evaluate(v=>v.currentSrc||v.src);
-              if(!fixtureSrc.includes('kidstv-playback.invalid/fixture.m3u8'))throw Error('iPad failed to select HLS media source: '+fixtureSrc);
-              await page.locator('#webPlayerClose').click();
-              if(await page.locator('#webPlayer.open').count())throw Error('iPad player did not close');
-              if(!(await page.locator('.card').count()))throw Error('iPad catalog missing after player close');
-              const mockedPlaybackUiPass=true;
               const result={pass:true,browser:flavor,mockedPlaybackUiPass,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,backgroundKp};
               fs.writeFileSync('qa-'+flavor+'.json',JSON.stringify(result,null,2));
               console.log('KIDSTV_IPAD_QA',JSON.stringify(result));
