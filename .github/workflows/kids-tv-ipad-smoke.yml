@@ -60,6 +60,8 @@ jobs:
               if((await page.locator('#status').innerText()).includes('взрослый режим'))throw Error('Adult timeout UI leaked');
               const cards=await page.locator('.card .title').allInnerTexts();
               if(cards.some(t=>String(t).includes('Гостья из будущего')))throw Error('Hidden Guest test content exposed');
+              await page.waitForTimeout(6500);
+              const posterStats=await page.locator('.card img').evaluateAll(imgs=>({loaded:imgs.filter(i=>i.complete&&i.naturalWidth>0).length,total:imgs.length}));
               await page.screenshot({path:'ipad_leva_catalog.png',fullPage:true});
               await page.getByRole('button',{name:'← Кто смотрит?'}).click();
               await page.locator('[data-audience-role="child"][data-slug="sonya"]').click();
@@ -68,7 +70,7 @@ jobs:
               const status=(await page.locator('#status').innerText()).trim();
               if(!status.includes('Лёва')||!status.includes('Соня')||!status.includes('Илюша'))throw Error('Joint selection not displayed: '+status);
               await page.reload({waitUntil:'domcontentloaded'});
-              await page.waitForFunction(()=>document.querySelector('#status')?.textContent?.includes('Лёва')&&document.querySelector('#status')?.textContent?.includes('Илюша'),{timeout:45000});
+              await page.waitForFunction(()=>document.querySelector('#pageTitle')?.textContent?.includes('Лёва')&&document.querySelector('#pageTitle')?.textContent?.includes('Илюша'),null,{timeout:45000});
               await page.screenshot({path:'ipad_three_children.png',fullPage:true});
               const manifest=await context.request.get('https://latatuev.github.io/kids-tv/manifest.webmanifest');
               if(!manifest.ok())throw Error('Manifest HTTP '+manifest.status());
@@ -77,7 +79,7 @@ jobs:
               if(tvPolls)throw Error('iPad unexpectedly polling TV state: '+tvPolls);
               if(backgroundKp)throw Error('iPad unexpectedly syncing KinoPub metadata: '+backgroundKp);
               if(errors.length)throw Error('Browser exceptions: '+JSON.stringify(errors.slice(0,6)));
-              const result={pass:true,version,firstCount,cards:cards.slice(0,15),status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,backgroundKp};
+              const result={pass:true,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,backgroundKp};
               fs.writeFileSync('qa.json',JSON.stringify(result,null,2));
               console.log('KIDSTV_IPAD_QA',JSON.stringify(result));
             }finally{
