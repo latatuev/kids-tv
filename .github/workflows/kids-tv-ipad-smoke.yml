@@ -1,0 +1,97 @@
+name: Kids TV iPad browser smoke
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/kids-tv-ipad-smoke.yml'
+permissions:
+  contents: read
+jobs:
+  ipad-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Install browser for end-user UI verification
+        run: |
+          mkdir -p /tmp/kidstv-ipad-smoke
+          cd /tmp/kidstv-ipad-smoke
+          npm init -y >/dev/null
+          npm install --silent --no-save playwright
+          npx playwright install chromium --with-deps >/dev/null
+      - name: Open actual published Kids TV in tablet browser
+        shell: bash
+        run: |
+          cd /tmp/kidstv-ipad-smoke
+          cat > test-ipad.cjs <<'JS'
+          const {chromium}=require('playwright');
+          const fs=require('fs');
+          (async()=>{
+            const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+            const context=await browser.newContext({
+              viewport:{width:1024,height:768},
+              deviceScaleFactor:2,
+              hasTouch:true,
+              isMobile:false,
+              userAgent:'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1',
+              locale:'ru-RU'
+            });
+            const page=await context.newPage();
+            const errors=[];
+            let tvPolls=0,backgroundKp=0;
+            page.on('pageerror',e=>errors.push(String(e)));
+            page.on('request',r=>{
+              const url=r.url();
+              if(url.includes('tv-state'))tvPolls++;
+              if(url.includes('kids-tv-kp-proxy/'))backgroundKp++;
+            });
+            try{
+              await page.goto('https://latatuev.github.io/kids-tv/?device=ipad-kids',{waitUntil:'domcontentloaded',timeout:60000});
+              await page.locator('[data-adult-audience-picker="1"]').waitFor({timeout:90000});
+              const version=(await page.locator('#appVersion').innerText()).trim();
+              if(!version.includes('iPad · Kids TV'))throw Error('Wrong mode: '+version);
+              await page.screenshot({path:'ipad_choose_children.png',fullPage:true});
+              await page.locator('[data-audience-role="child"][data-slug="leva"]').click();
+              await page.locator('[data-audience-role="show"]').click();
+              await page.locator('.card').first().waitFor({timeout:25000});
+              const firstCount=await page.locator('.card').count();
+              if(firstCount<2)throw Error('Leva content unexpectedly empty, cards='+firstCount);
+              const closedButton=await page.getByRole('button',{name:'✕ Закрыть'}).count();
+              if(closedButton)throw Error('TV parental close button exposed in iPad child UI');
+              if((await page.locator('#status').innerText()).includes('взрослый режим'))throw Error('Adult timeout UI leaked');
+              const cards=await page.locator('.card .title').allInnerTexts();
+              if(cards.some(t=>String(t).includes('Гостья из будущего')))throw Error('Hidden Guest test content exposed');
+              await page.screenshot({path:'ipad_leva_catalog.png',fullPage:true});
+              await page.getByRole('button',{name:'← Кто смотрит?'}).click();
+              await page.locator('[data-audience-role="child"][data-slug="sonya"]').click();
+              await page.locator('[data-audience-role="child"][data-slug="ilyusha"]').click();
+              await page.locator('[data-audience-role="show"]').click();
+              const status=(await page.locator('#status').innerText()).trim();
+              if(!status.includes('Лёва')||!status.includes('Соня')||!status.includes('Илюша'))throw Error('Joint selection not displayed: '+status);
+              await page.reload({waitUntil:'domcontentloaded'});
+              await page.waitForFunction(()=>document.querySelector('#status')?.textContent?.includes('Лёва')&&document.querySelector('#status')?.textContent?.includes('Илюша'),{timeout:45000});
+              await page.screenshot({path:'ipad_three_children.png',fullPage:true});
+              const manifest=await context.request.get('https://latatuev.github.io/kids-tv/manifest.webmanifest');
+              if(!manifest.ok())throw Error('Manifest HTTP '+manifest.status());
+              const mj=await manifest.json();
+              if(!String(mj.start_url).includes('ipad-kids'))throw Error('Manifest start_url missing iPad mode');
+              if(tvPolls)throw Error('iPad unexpectedly polling TV state: '+tvPolls);
+              if(backgroundKp)throw Error('iPad unexpectedly syncing KinoPub metadata: '+backgroundKp);
+              if(errors.length)throw Error('Browser exceptions: '+JSON.stringify(errors.slice(0,6)));
+              const result={pass:true,version,firstCount,cards:cards.slice(0,15),status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,backgroundKp};
+              fs.writeFileSync('qa.json',JSON.stringify(result,null,2));
+              console.log('KIDSTV_IPAD_QA',JSON.stringify(result));
+            }finally{
+              await browser.close();
+            }
+          })().catch(e=>{console.error('KIDSTV_IPAD_SMOKE_FAILED',e.message);process.exitCode=1});
+          JS
+          node test-ipad.cjs
+      - name: Upload screenshots and QA report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kids-tv-ipad-browser-smoke
+          path: |
+            /tmp/kidstv-ipad-smoke/*.png
+            /tmp/kidstv-ipad-smoke/qa.json
+          retention-days: 3
