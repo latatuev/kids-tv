@@ -69,6 +69,7 @@ jobs:
               await page.waitForTimeout(6500);
               const posterStats=await page.locator('.card img').evaluateAll(imgs=>({loaded:imgs.filter(i=>i.complete&&i.naturalWidth>0).length,total:imgs.length}));
               await page.screenshot({path:'ipad_'+flavor+'_leva_catalog.png',fullPage:true});
+              if(backgroundKp)throw Error('iPad unexpectedly syncing KinoPub metadata: '+backgroundKp);
               // Isolated playback-route fixture: no real KinoPub credentials, streams or data changes.
               await page.evaluate(()=>localStorage.setItem('kidstv_kp_token','ci-isolated-playback-fixture'));
               await page.route('**/kids-tv-kp-proxy/**',route=>route.fulfill({
@@ -82,6 +83,7 @@ jobs:
               await page.locator('#webPlayerClose').click();
               if(await page.locator('#webPlayer.open').count())throw Error('iPad player did not close');
               if(!(await page.locator('.card').count()))throw Error('iPad catalog missing after player close');
+              if(backgroundKp!==1)throw Error('Expected exactly one mocked KinoPub request, got '+backgroundKp);
               const mockedPlaybackUiPass=true;
               await page.getByRole('button',{name:'← Кто смотрит?'}).click();
               await page.locator('[data-audience-role="child"][data-slug="sonya"]').click();
@@ -97,9 +99,8 @@ jobs:
               const mj=await manifest.json();
               if(!String(mj.start_url).includes('ipad-kids'))throw Error('Manifest start_url missing iPad mode');
               if(tvPolls)throw Error('iPad unexpectedly polling TV state: '+tvPolls);
-              if(backgroundKp)throw Error('iPad unexpectedly syncing KinoPub metadata: '+backgroundKp);
               if(errors.length)throw Error('Browser exceptions: '+JSON.stringify(errors.slice(0,6)));
-              const result={pass:true,browser:flavor,mockedPlaybackUiPass,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,backgroundKp};
+              const result={pass:true,browser:flavor,mockedPlaybackUiPass,version,firstCount,cards:cards.slice(0,15),posterStats,status,manifest:mj.start_url,mode:'tablet browser emulation; NOT actual iPad Safari',tvPolls,mockedKpRequests:backgroundKp};
               fs.writeFileSync('qa-'+flavor+'.json',JSON.stringify(result,null,2));
               console.log('KIDSTV_IPAD_QA',JSON.stringify(result));
             }finally{
