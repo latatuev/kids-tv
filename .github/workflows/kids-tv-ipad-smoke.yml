@@ -87,7 +87,7 @@ jobs:
               if(errors.length)throw Error('Browser exceptions: '+JSON.stringify(errors.slice(0,6)));
               // Isolated playback-route fixture: no real KinoPub credentials, streams or data changes.
               await page.evaluate(()=>localStorage.setItem('kidstv_kp_token','ci-isolated-playback-fixture'));
-              await page.route(/kids-tv-kp-proxy\\//,route=>route.fulfill({
+              await page.route('**/kids-tv-kp-proxy/**',route=>route.fulfill({
                 status:200,contentType:'application/json',
                 body:JSON.stringify({item:{videos:[{files:[{quality:'720',url:{hls:'https://kidstv-playback.invalid/fixture.m3u8'}}]}]}})
               }));
