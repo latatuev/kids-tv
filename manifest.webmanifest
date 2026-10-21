@@ -2,7 +2,7 @@
   "id": "./?device=ipad-kids",
   "name": "Kids TV — медиатека для детей",
   "short_name": "Kids TV",
-  "description": "Единая детская видеотека с профилями Лёвы, Сони и Илюши",
+  "description": "Детские профили, мультфильмы и фильмы в общей медиатеке",
   "lang": "ru",
   "start_url": "./?device=ipad-kids",
   "scope": "./",
