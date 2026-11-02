@@ -1,0 +1,32 @@
+name: Family Call standalone APK
+on:
+  push:
+    branches: [family-call-apk-build-20261102]
+    paths: ['family-call/**', '.github/workflows/family-call-apk-20261102.yml']
+  workflow_dispatch:
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: family-call
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Android SDK API 34
+        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'platforms;android-34' 'build-tools;34.0.0'"
+      - name: Assemble Android APK
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: family-call-android-021
+          path: family-call/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
