@@ -1,0 +1,51 @@
+name: Family Call v0.6.1 timer restoration APK
+on:
+  push:
+    branches: [family-call-v061-ci-20261103]
+    paths:
+      - 'family-call/_source_v061.tar.xz'
+      - '.github/workflows/family-call-v061.yml'
+  workflow_dispatch:
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify exact v0.6.1 sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '9ed3723a78accb666e6d57a8561170389338a06e749ea627837cd875a63309e1  family-call/_source_v061.tar.xz' | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/family-call-v061"
+          tar -xJf family-call/_source_v061.tar.xz -C "$RUNNER_TEMP/family-call-v061"
+          test -f "$RUNNER_TEMP/family-call-v061/family-call/app/src/main/java/ru/family/call/SilenceController.java"
+          grep -Fq "versionName '0.6.1'" "$RUNNER_TEMP/family-call-v061/family-call/app/build.gradle"
+          grep -Fq "setAlarmClock(" "$RUNNER_TEMP/family-call-v061/family-call/app/src/main/java/ru/family/call/SilenceController.java"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Install Android SDK 34
+        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'platforms;android-34' 'build-tools;34.0.0'"
+      - name: Test and assemble one APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/family-call-v061/family-call"
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Verify APK output and digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "$RUNNER_TEMP/family-call-v061/family-call/app/build/outputs/apk/debug/app-debug.apk"
+          sha256sum "$RUNNER_TEMP/family-call-v061/family-call/app/build/outputs/apk/debug/app-debug.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: family-call-v061-debug-apk
+          path: ${{ runner.temp }}/family-call-v061/family-call/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
