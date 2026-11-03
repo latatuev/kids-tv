@@ -1,0 +1,44 @@
+name: Family Call v0.6 APK build
+on:
+  push:
+    branches: [family-call-v06-ci-20261103]
+    paths:
+      - 'family-call/_source_v06.tar.xz'
+      - '.github/workflows/family-call-v06-ci.yml'
+  workflow_dispatch:
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and unpack v0.6 source
+        run: |
+          echo 'f0afdea413a29e5a6ad37d95064544eff9d938891a31ccecc2e058d13ca9b019  family-call/_source_v06.tar.xz' | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/family-call-v06"
+          tar -xJf family-call/_source_v06.tar.xz -C "$RUNNER_TEMP/family-call-v06"
+          test -f "$RUNNER_TEMP/family-call-v06/family-call/app/src/main/java/ru/family/call/RelayClient.java"
+          grep -q "versionName '0.6-dev'" "$RUNNER_TEMP/family-call-v06/family-call/app/build.gradle"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Install Android SDK 34
+        run: "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'platforms;android-34' 'build-tools;34.0.0'"
+      - name: Run unit tests and assemble v0.6
+        run: |
+          cd "$RUNNER_TEMP/family-call-v06/family-call"
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - name: Verify produced APK
+        run: |
+          test -s "$RUNNER_TEMP/family-call-v06/family-call/app/build/outputs/apk/debug/app-debug.apk"
+          sha256sum "$RUNNER_TEMP/family-call-v06/family-call/app/build/outputs/apk/debug/app-debug.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: family-call-v06-debug-apk
+          path: ${{ runner.temp }}/family-call-v06/family-call/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
